@@ -78,3 +78,39 @@ test("an item appended after a clear remains for the next clear", async () => {
     assert.deepEqual(await readAndClear(), []);
   });
 });
+
+test("re-sending an item id overwrites its pending entry with the latest content", async () => {
+  await withInbox(async (dir) => {
+    await appendItems([{ id: "annotation-1", comment: "original" }]);
+    await appendItems([{ id: "annotation-1", comment: "updated" }]);
+    await appendItems([{ id: "annotation-2", comment: "separate" }]);
+
+    assert.deepEqual((await readdir(join(dir, "pending"))).sort(), ["annotation-1.json", "annotation-2.json"]);
+    assert.deepEqual(await readAndClear(), [
+      { id: "annotation-1", comment: "updated" },
+      { id: "annotation-2", comment: "separate" },
+    ]);
+  });
+});
+
+test("unsafe item ids are sanitized without escaping the pending directory", async () => {
+  await withInbox(async (dir) => {
+    const item = { id: "a/b", comment: "contained" };
+
+    await appendItems([item]);
+
+    assert.deepEqual(await readdir(join(dir, "pending")), ["a_b.json"]);
+    await assert.rejects(readFile(join(dir, "a.json"), "utf8"), { code: "ENOENT" });
+    assert.deepEqual(await readAndClear(), [item]);
+  });
+});
+
+test("concurrent consumers tolerate files removed by the other consumer", async () => {
+  await withInbox(async () => {
+    await appendItems([{ id: "racing-item", comment: "race" }]);
+
+    const results = await Promise.allSettled([readAndClear(), readAndClear()]);
+
+    assert.ok(results.every(({ status }) => status === "fulfilled"));
+  });
+});

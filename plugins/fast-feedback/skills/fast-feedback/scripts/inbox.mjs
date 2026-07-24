@@ -17,7 +17,15 @@ async function writeAtomically(path, contents) {
   const temporaryPath = path + "." + randomUUID() + ".tmp";
   try {
     await writeFile(temporaryPath, contents, "utf8");
-    await rename(temporaryPath, path);
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await rename(temporaryPath, path);
+        break;
+      } catch (error) {
+        if (error?.code !== "EPERM" || attempt === 2) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    }
   } catch (error) {
     await rm(temporaryPath, { force: true });
     throw error;
@@ -26,16 +34,33 @@ async function writeAtomically(path, contents) {
 
 async function pendingFiles(pendingDir) {
   const names = (await readdir(pendingDir)).filter((name) => name.endsWith(".json"));
-  const files = await Promise.all(names.map(async (name) => ({
-    name,
-    mtimeMs: (await stat(join(pendingDir, name))).mtimeMs,
-  })));
-  return files.sort((left, right) => left.mtimeMs - right.mtimeMs || left.name.localeCompare(right.name));
+  const files = await Promise.all(names.map(async (name) => {
+    try {
+      return { name, mtimeMs: (await stat(join(pendingDir, name))).mtimeMs };
+    } catch (error) {
+      if (error?.code === "ENOENT") return null;
+      throw error;
+    }
+  }));
+  return files.filter(Boolean).sort((left, right) => left.mtimeMs - right.mtimeMs || left.name.localeCompare(right.name));
 }
 
 async function readPending(pendingDir) {
   const files = await pendingFiles(pendingDir);
-  return Promise.all(files.map(async ({ name }) => JSON.parse(await readFile(join(pendingDir, name), "utf8"))));
+  const entries = await Promise.all(files.map(async ({ name }) => {
+    try {
+      return { item: JSON.parse(await readFile(join(pendingDir, name), "utf8")) };
+    } catch (error) {
+      if (error?.code === "ENOENT") return null;
+      throw error;
+    }
+  }));
+  return entries.filter(Boolean).map(({ item }) => item);
+}
+
+function filenameForItem(item) {
+  if (typeof item?.id !== "string" || !item.id) return randomUUID() + ".json";
+  return item.id.replace(/[^A-Za-z0-9._-]/g, "_") + ".json";
 }
 
 function buildMarkdown(items) {
@@ -71,7 +96,7 @@ export async function appendItems(items) {
 
   const { dir, pendingDir } = await ensureInbox();
   await Promise.all(items.map((item) => writeAtomically(
-    join(pendingDir, randomUUID() + ".json"),
+    join(pendingDir, filenameForItem(item)),
     JSON.stringify(item),
   )));
   await regenerateMirrors(dir, pendingDir);
@@ -90,11 +115,22 @@ export async function count() {
 export async function readAndClear() {
   const { dir, pendingDir } = await ensureInbox();
   const files = await pendingFiles(pendingDir);
-  const items = await Promise.all(files.map(async ({ name }) => ({
-    name,
-    item: JSON.parse(await readFile(join(pendingDir, name), "utf8")),
-  })));
-  await Promise.all(items.map(({ name }) => rm(join(pendingDir, name))));
+  const entries = await Promise.all(files.map(async ({ name }) => {
+    try {
+      return { name, item: JSON.parse(await readFile(join(pendingDir, name), "utf8")) };
+    } catch (error) {
+      if (error?.code === "ENOENT") return null;
+      throw error;
+    }
+  }));
+  const items = entries.filter(Boolean);
+  await Promise.all(items.map(async ({ name }) => {
+    try {
+      await rm(join(pendingDir, name));
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }));
   await regenerateMirrors(dir, pendingDir);
   return items.map(({ item }) => item);
 }

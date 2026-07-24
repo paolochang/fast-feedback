@@ -46,10 +46,13 @@ function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-export async function waitForFeedback() {
+export async function waitForFeedback(inbox = { count, readAndClear }) {
   const deadline = Date.now() + waitTimeoutMs();
   while (Date.now() <= deadline) {
-    if (await count()) return readAndClear();
+    if (await inbox.count()) {
+      const items = await inbox.readAndClear();
+      if (items.length) return items;
+    }
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
     await delay(Math.min(POLL_INTERVAL_MS, remaining));
@@ -85,9 +88,11 @@ function methodNotFound(id) {
 }
 
 export async function handleRequest(request) {
-  if (request?.method?.startsWith("notifications/")) return null;
+  if (request?.id === undefined || request?.method?.startsWith("notifications/")) return null;
 
   switch (request?.method) {
+    case "ping":
+      return response(request.id, {});
     case "initialize":
       return response(request.id, {
         protocolVersion: PROTOCOL_VERSION,
@@ -124,8 +129,9 @@ async function serveStdio() {
       continue;
     }
 
-    const reply = await handleRequest(request);
-    if (reply) process.stdout.write(JSON.stringify(reply) + "\n");
+    handleRequest(request).then((reply) => {
+      if (reply) process.stdout.write(JSON.stringify(reply) + "\n");
+    });
   }
 }
 
