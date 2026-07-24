@@ -86,9 +86,12 @@ const saveFn = "window.__FFB_SAVE=function(p){try{fetch('/__ffb__/settings',{met
 // server writes it to the configured folder (the browser can't write a path
 // itself). Resolves to the saved absolute path so the overlay can show it.
 const saveShotFn = "window.__FFB_SAVE_SHOT=function(blob){return fetch('/__ffb__/screenshot',{method:'POST',headers:{'content-type':'image/png'},body:blob}).then(function(r){return r.json();}).then(function(j){return j&&j.path;});};";
+// window.__FFB_SEND posts only live feedback items. Unlike save settings, a
+// failed response rejects so the overlay can truthfully keep those items dirty.
+const sendFn = "window.__FFB_SEND=function(items){return fetch('/__ffb__/send',{method:'POST',headers:{'content-type':'application/json','x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "},body:JSON.stringify(items)}).then(function(r){if(!r.ok)throw new Error('Send failed: '+r.status);return r;});};";
 // Rebuilt per HTML response so a fresh reload reflects the latest saved settings.
 function bootScript() {
-  return "\n<script>window.__FFB_FILE=" + JSON.stringify(targetUrl.host) + ";" + bootAssignments() + saveFn + saveShotFn + "</script>\n" +
+  return "\n<script>window.__FFB_FILE=" + JSON.stringify(targetUrl.host) + ";" + bootAssignments() + saveFn + saveShotFn + sendFn + "</script>\n" +
     "<script>\n" + buildEngine() + "\n</script>\n";
 }
 
