@@ -23,10 +23,12 @@
 
 import http from "node:http";
 import net from "node:net";
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bootAssignments, applyUpdate, saveScreenshot } from "./settings.mjs";
+import * as inbox from "./inbox.mjs";
 
 const argv = process.argv.slice(2);
 function opt(name, def) { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : def; }
@@ -45,6 +47,23 @@ if (targetUrl.protocol !== "http:") {
 const PORT = parseInt(opt("--port", "5000"), 10);
 const THOST = targetUrl.hostname;
 const TPORT = targetUrl.port || "80";
+const MAX_SEND_BODY_BYTES = 256 * 1024;
+
+// TASK-02 can inject this into window.__FFB_SEND when it builds the client boot
+// script. It is minted once for each proxy process and never logged.
+export const FFB_SEND_TOKEN = randomBytes(24).toString("hex");
+
+function sendJson(response, statusCode, payload) {
+  response.writeHead(statusCode, { "content-type": "application/json" });
+  response.end(JSON.stringify(payload));
+}
+
+function isOwnProxyOrigin(headers) {
+  const host = String(headers.host || "").toLowerCase();
+  const origin = String(headers.origin || "").toLowerCase();
+  const proxyHosts = new Set(["localhost:" + PORT, "127.0.0.1:" + PORT]);
+  return proxyHosts.has(host) && proxyHosts.has(origin.replace(/^http:\/\//, ""));
+}
 
 // Build the overlay bundle exactly like the other modes: vendored html2canvas
 // (MIT) inlined ahead of the engine so Screenshot works offline, then the engine.
@@ -79,6 +98,59 @@ function bootScript() {
 const STRIP = new Set(["x-frame-options", "content-security-policy", "content-security-policy-report-only"]);
 
 const server = http.createServer(function (creq, cres) {
+  // Feedback submissions stay on the loopback-only proxy. Check all request
+  // guards before buffering/parsing a body, and never forward this route.
+  if (creq.method === "POST" && creq.url === "/__ffb__/send") {
+    if (creq.headers["x-ffb-token"] !== FFB_SEND_TOKEN || !isOwnProxyOrigin(creq.headers)) {
+      sendJson(cres, 403, { error: "forbidden" });
+      return;
+    }
+    if (String(creq.headers["content-type"] || "").split(";", 1)[0].trim().toLowerCase() !== "application/json") {
+      sendJson(cres, 415, { error: "content-type must be application/json" });
+      return;
+    }
+    if (Number(creq.headers["content-length"] || 0) > MAX_SEND_BODY_BYTES) {
+      sendJson(cres, 413, { error: "request body too large" });
+      return;
+    }
+
+    let size = 0;
+    let tooLarge = false;
+    const chunks = [];
+    creq.on("data", function (chunk) {
+      if (tooLarge) return;
+      size += chunk.length;
+      if (size > MAX_SEND_BODY_BYTES) {
+        tooLarge = true;
+        sendJson(cres, 413, { error: "request body too large" });
+        return;
+      }
+      chunks.push(chunk);
+    });
+    creq.on("end", async function () {
+      if (tooLarge) return;
+      let parsed;
+      try {
+        parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      } catch (error) {
+        sendJson(cres, 400, { error: "invalid JSON" });
+        return;
+      }
+      const items = Array.isArray(parsed) ? parsed : parsed && parsed.items;
+      if (!Array.isArray(items)) {
+        sendJson(cres, 400, { error: "items must be an array" });
+        return;
+      }
+      try {
+        await inbox.appendItems(items);
+        sendJson(cres, 200, { ok: true, count: await inbox.count() });
+      } catch (error) {
+        sendJson(cres, 500, { error: "could not store feedback" });
+      }
+    });
+    return;
+  }
+
   // Settings write-back from the overlay — persist to the on-disk file and don't
   // forward it to the dev server. Global hotkeys / this project's theme.
   if (creq.method === "POST" && creq.url === "/__ffb__/settings") {
@@ -168,7 +240,7 @@ server.on("upgrade", function (creq, csocket, head) {
   csocket.on("error", function () { psocket.destroy(); });
 });
 
-server.listen(PORT, function () {
+server.listen(PORT, "127.0.0.1", function () {
   console.log("fast-feedback proxy running:");
   console.log("  http://localhost:" + PORT + "  →  " + target);
   console.log("");
