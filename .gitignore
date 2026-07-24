@@ -11,3 +11,6 @@ feedback-screenshot.png
 
 # project-scoped settings written by the overlay
 .claude/skills/fast-feedback/settings.json
+
+# Agent Bus working artifacts (orchestration state, local-only)
+/agent-bus/
