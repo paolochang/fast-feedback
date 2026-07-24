@@ -14,3 +14,6 @@ feedback-screenshot.png
 
 # Agent Bus working artifacts (orchestration state, local-only)
 /agent-bus/
+
+# Local-only docs (plans / registry) — kept private, not published
+/docs/
