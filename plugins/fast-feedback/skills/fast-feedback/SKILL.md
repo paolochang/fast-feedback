@@ -91,7 +91,11 @@ running just adds a wrapper on a new port.
    ```
    It injects the overlay (with `html2canvas` inlined) into the dev server's HTML,
    strips `X-Frame-Options`/CSP, and **forwards the HMR WebSocket** so hot reload
-   keeps working. Everything else streams straight through.
+   keeps working. Everything else streams straight through. Run this command from
+   the **project root**: the proxy and MCP server rendezvous through
+   `<project-root>/.ffb/`. Add `.ffb/` to that project's `.gitignore`; it is local
+   feedback state. If the processes must use different working directories, set
+   `FFB_INBOX` to the same absolute inbox path for both.
 3. **Tell the user to open `http://localhost:5000`** (the proxy) instead of the
    real dev port. The overlay bar is already there — annotate (below). Toggle the
    whole overlay with **Ctrl+.** whenever it's in the way; the app is otherwise
@@ -101,6 +105,28 @@ running just adds a wrapper on a new port.
 4. **Read the feedback and edit the source components.** The element descriptor +
    text quote points you at the right component even when class names are
    hashed/utility.
+
+### Send feedback directly to the AI (live/proxy mode)
+
+In live/proxy mode, the overlay's **Send to AI** button (default hotkey:
+**Ctrl+Backslash**) sends new annotations to the local inbox for the MCP server. Use it
+after submitting the notes you want applied. **Copy All** (default **Ctrl+'**)
+remains the universal fallback for file mode, non-MCP clients, human reviewers,
+and web chat: paste the copied feedback into the conversation as usual.
+
+Claude Code auto-registers the Fast Feedback MCP server when this plugin is
+installed. It provides four tools:
+
+- `ffb_pull` reads and clears all pending feedback.
+- `ffb_wait` waits for feedback, then reads and clears it.
+- `ffb_peek` reads pending feedback without clearing it.
+- `ffb_status` returns the number of pending items.
+
+For the **watch loop** (review mode), call `ffb_wait`, apply the returned
+feedback, then call `ffb_wait` again to re-arm it. For clients that do not support
+long-polling, call `ffb_pull` once when the user says they sent feedback. Codex
+and Cursor need a one-time `mcp add` registration for this server; they do not
+need to add it for each use.
 
 Limits (be honest): the proxy is built for **local dev servers** you're working
 on. An **https** dev server needs a local cert — start it on http for the review,
@@ -196,9 +222,9 @@ screenshot · in a form **Ctrl+Enter** submit / **Esc** cancel.
 
 ```
 # Fast feedback (ep001-what_is_s&p500.mockup.html)
-- [1] div.basket "the S&P 500"  [x30% y52% w40% h9%]  더 납작하지 않게, height 키워
-- [2] span.gold "— in one basket"  [x28% y70% w44% h5%]  이 줄 폰트 더 크게
-- [3] div.tickers  [x8% y40% w84% h8%]  칩들이 너무 붙음, 간격 벌려
+- [1] div.basket "the S&P 500"  [x30% y52% w40% h9%]  make this less flat, increase the height
+- [2] span.gold "— in one basket"  [x28% y70% w44% h5%]  make this line's font bigger
+- [3] div.tickers  [x8% y40% w84% h8%]  the chips are too cramped, add spacing
 ```
 
 - `[n]` — annotation number (matches the numbered box on the page).

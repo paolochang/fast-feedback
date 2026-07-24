@@ -1,7 +1,7 @@
 {
   "name": "fast-feedback",
   "description": "In-browser highlight-and-comment overlay for giving precise, structured feedback on any frontend — static mockups or a running dev server — that an AI coding agent (Claude Code) can read and act on.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": { "name": "Paolo Chang", "url": "https://github.com/paolochang" },
   "homepage": "https://github.com/paolochang/fast-feedback",
   "repository": "https://github.com/paolochang/fast-feedback",
