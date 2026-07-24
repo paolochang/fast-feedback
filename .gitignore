@@ -1,0 +1,13 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+
+# fast-feedback runtime output (generated when the tool is used)
+*.review.html
+fast-feedback.snippet.js
+fast-feedback.bookmarklet.txt
+feedback-screenshot.png
+
+# project-scoped settings written by the overlay
+.claude/skills/fast-feedback/settings.json
