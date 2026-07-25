@@ -863,6 +863,7 @@
     var request;
     var sentToInbox = false;
     var archiveStarted = false;
+    var flushUrl = location.href;   // freeze the URL at flush start (see capturePromise)
     sendInFlight = true;
     try {
       request = canSend && toSend.length ? window.__FFB_SEND(toSend.map(function (entry) {
@@ -874,6 +875,13 @@
       showToast("Send failed — items kept", true);
       return;
     }
+    // Capture the page at flush start, in parallel with the already-dispatched
+    // send, so the screenshot, frozen box geometry, and URL are one coherent
+    // snapshot: an SPA nav/resize/reflow during the in-flight send can't smear a
+    // newer screenshot (or route) over regions frozen at flush start. The send
+    // stays independent of capture — inbox delivery must not hinge on html2canvas.
+    var capturePromise = capturePng(true);
+    capturePromise.catch(function () {});   // send-fail paths discard it; avoid an unhandled rejection
     Promise.resolve(request).then(function () {
       if (canSend && toSend.length) {
         sentToInbox = true;
@@ -884,11 +892,11 @@
         toSend.forEach(function (entry) { if (entry.ann.revision === entry.revision) entry.ann.sentToInbox = true; });
       }
       archiveStarted = true;
-      return capturePng(true).then(function (capture) {
+      return capturePromise.then(function (capture) {
         var meta = {
           id: crypto.randomUUID(),
           ts: new Date().toISOString(),
-          url: location.href,
+          url: flushUrl,
           capture: { w: capture.w, h: capture.h },
           items: snapshot.map(function (entry, index) {
             var item = items[index];
