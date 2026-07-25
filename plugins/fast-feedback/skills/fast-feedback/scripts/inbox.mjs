@@ -32,7 +32,24 @@ async function writeAtomically(path, contents) {
   }
 }
 
+async function recoverAbandonedClaims(pendingDir) {
+  const ttlMs = process.env.FFB_CLAIM_TTL_MS === undefined ? 60000 : Number(process.env.FFB_CLAIM_TTL_MS);
+  const claims = (await readdir(pendingDir)).map((name) => {
+    const match = name.match(/^([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json)\.[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.claimed$/i);
+    return match ? { claimedName: name, name: match[1] } : null;
+  }).filter(Boolean);
+  await Promise.all(claims.map(async ({ claimedName, name }) => {
+    try {
+      if ((await stat(join(pendingDir, claimedName))).mtimeMs >= Date.now() - ttlMs) return;
+      await rename(join(pendingDir, claimedName), join(pendingDir, name));
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }));
+}
+
 async function pendingFiles(pendingDir) {
+  await recoverAbandonedClaims(pendingDir);
   const names = (await readdir(pendingDir)).filter((name) => name.endsWith(".json"));
   const files = await Promise.all(names.map(async (name) => {
     try {
@@ -123,6 +140,7 @@ export async function count() {
 
 export async function readAndClear() {
   const { dir, pendingDir } = await ensureInbox();
+  await recoverAbandonedClaims(pendingDir);
   const files = await pendingFiles(pendingDir);
   const claims = await Promise.all(files.map(async ({ name }) => {
     const claimedName = name + "." + randomUUID() + ".claimed";
@@ -134,17 +152,34 @@ export async function readAndClear() {
       throw error;
     }
   }));
-  const entries = await Promise.all(claims.filter(Boolean).map(async ({ claimedName }) => ({
-    claimedName,
-    item: JSON.parse(await readFile(join(pendingDir, claimedName), "utf8")),
-  })));
-  await Promise.all(entries.map(async ({ claimedName }) => {
+  const entries = await Promise.all(claims.filter(Boolean).map(async ({ claimedName }) => {
+    try {
+      return {
+        claimedName,
+        item: JSON.parse(await readFile(join(pendingDir, claimedName), "utf8")),
+      };
+    } catch (error) {
+      try {
+        await rename(join(pendingDir, claimedName), join(pendingDir, claimedName + ".corrupt"));
+      } catch (renameError) {
+        if (renameError?.code !== "ENOENT") throw renameError;
+      }
+      console.error(error);
+      return null;
+    }
+  }));
+  const readableEntries = entries.filter(Boolean);
+  await Promise.all(readableEntries.map(async ({ claimedName }) => {
     try {
       await rm(join(pendingDir, claimedName));
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
     }
   }));
-  await regenerateMirrors(dir, pendingDir);
-  return entries.map(({ item }) => item);
+  try {
+    await regenerateMirrors(dir, pendingDir);
+  } catch (error) {
+    console.error(error);
+  }
+  return readableEntries.map(({ item }) => item);
 }

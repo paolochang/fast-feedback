@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -141,5 +141,60 @@ test("concurrent consumers exclusively claim every pending item", async () => {
     assert.equal(returned.length, items.length);
     assert.equal(new Set(returned.map(({ id }) => id)).size, items.length);
     assert.deepEqual(returned.map(({ comment }) => comment).sort(), items.map(({ comment }) => comment).sort());
+  });
+});
+
+test("readAndClear returns consumed items when mirror regeneration fails", async () => {
+  await withInbox(async (dir) => {
+    const items = [{ selector: "main", comment: "Keep this" }];
+    await appendItems(items);
+    await rm(join(dir, "inbox.jsonl"));
+    await mkdir(join(dir, "inbox.jsonl"));
+
+    assert.deepEqual((await readAndClear()).map(({ id, ...item }) => item), items);
+    assert.deepEqual(await readAndClear(), []);
+  });
+});
+
+test("readAndClear quarantines unreadable claims and returns valid items", async () => {
+  await withInbox(async (dir) => {
+    const item = { selector: "main", comment: "Keep this" };
+    const badName = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.json";
+    await appendItems([item]);
+    await writeFile(join(dir, "pending", badName), "not json", "utf8");
+
+    assert.deepEqual((await readAndClear()).map(({ id, ...entry }) => entry), [item]);
+    const files = await readdir(join(dir, "pending"));
+    assert.equal(files.filter((name) => name.endsWith(".claimed")).length, 0);
+    assert.ok(files.some((name) => name.startsWith(badName + ".") && name.endsWith(".claimed.corrupt")));
+    assert.deepEqual(await readAndClear(), []);
+  });
+});
+
+test("count, peek, and readAndClear recover expired claims", async () => {
+  await withInbox(async (dir) => {
+    const item = { comment: "abandoned" };
+    const claimedName = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.json.bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.claimed";
+    const claimedPath = join(dir, "pending", claimedName);
+    await appendItems([]);
+    await writeFile(claimedPath, JSON.stringify(item), "utf8");
+    await utimes(claimedPath, new Date(Date.now() - 120000), new Date(Date.now() - 120000));
+
+    assert.equal(await count(), 1);
+    assert.deepEqual(await peek(), [item]);
+    assert.deepEqual(await readAndClear(), [item]);
+  });
+});
+
+test("count, peek, and readAndClear ignore fresh claims", async () => {
+  await withInbox(async (dir) => {
+    const claimedName = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.json.bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.claimed";
+    await appendItems([]);
+    await writeFile(join(dir, "pending", claimedName), JSON.stringify({ comment: "in flight" }), "utf8");
+
+    assert.equal(await count(), 0);
+    assert.deepEqual(await peek(), []);
+    assert.deepEqual(await readAndClear(), []);
+    assert.ok((await readdir(join(dir, "pending"))).includes(claimedName));
   });
 });
