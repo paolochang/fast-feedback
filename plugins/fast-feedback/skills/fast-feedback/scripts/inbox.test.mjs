@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rmdir, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rmdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { appendItems, count, peek, readAndClear, regenerateMirrors, withMirrorLock } from "./inbox.mjs";
+import { appendItems, count, peek, readAndClear, withLock } from "./inbox.mjs";
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function withInbox(run) {
   const dir = await mkdtemp(join(tmpdir(), "ffb-inbox-"));
@@ -16,6 +18,12 @@ async function withInbox(run) {
     else process.env.FFB_INBOX = previous;
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+async function assertMirrorMatchesSpool(dir) {
+  const jsonl = await readFile(join(dir, "inbox.jsonl"), "utf8");
+  const mirror = jsonl.trim() ? jsonl.trim().split("\n").map((line) => JSON.parse(line)) : [];
+  assert.deepEqual(mirror, await peek());
 }
 
 test("appendItems atomically spools every item and regenerates both mirrors", async () => {
@@ -155,122 +163,151 @@ test("concurrent consumers exclusively claim every pending item", async () => {
   });
 });
 
-test("concurrent consumers do not recover an aged item after it is claimed", async () => {
+test("concurrent consumers deliver an aged pending item exactly once", async () => {
   await withInbox(async (dir) => {
     const item = { comment: "aged before claim" };
-    let releaseRemove;
-    let claimed;
-    const removeClaimed = new Promise((resolve) => {
-      claimed = resolve;
-    });
-    const waitForRemove = new Promise((resolve) => {
-      releaseRemove = resolve;
-    });
-    const previousTtl = process.env.FFB_CLAIM_TTL_MS;
-    process.env.FFB_CLAIM_TTL_MS = "1000";
+    await appendItems([item]);
+    const [name] = await readdir(join(dir, "pending"));
+    const pendingPath = join(dir, "pending", name);
+    await utimes(pendingPath, new Date(Date.now() - 120000), new Date(Date.now() - 120000));
+
+    const returned = (await Promise.all([readAndClear(), readAndClear()])).flat();
+
+    assert.deepEqual(returned.map(({ comment }) => comment), [item.comment]);
+  });
+});
+
+test("readAndClear does not return an item when its claimed file disappears before deletion", async () => {
+  await withInbox(async () => {
+    const item = { comment: "recover and delete me" };
+    await appendItems([item]);
+
+    const returned = await readAndClear({ remove: async (path) => {
+      await rm(path);
+      const error = new Error("already removed");
+      error.code = "ENOENT";
+      throw error;
+    } });
+
+    assert.deepEqual(returned, []);
+    assert.deepEqual(await readAndClear(), []);
+  });
+});
+
+test("spool operations wait for the operation lock instead of skipping", async () => {
+  await withInbox(async (dir) => {
+    const lockDir = join(dir, ".lock");
+    await mkdir(lockDir);
+    const append = appendItems([{ comment: "wait for lock" }]);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await assert.rejects(readFile(join(dir, "inbox.jsonl"), "utf8"), { code: "ENOENT" });
+
+    await rmdir(lockDir);
+    await append;
+    assert.deepEqual((await peek()).map(({ comment }) => comment), ["wait for lock"]);
+  });
+});
+
+test("a live lock holder renews its lease so a contender does not overlap", async () => {
+  await withInbox(async (dir) => {
+    const previousLease = process.env.FFB_LOCK_LEASE_MS;
+    process.env.FFB_LOCK_LEASE_MS = "120";
     try {
-      await appendItems([item]);
-      const [name] = await readdir(join(dir, "pending"));
-      const pendingPath = join(dir, "pending", name);
-      await utimes(pendingPath, new Date(Date.now() - 120000), new Date(Date.now() - 120000));
+      const events = [];
+      const first = withLock(dir, async () => {
+        events.push("A-start");
+        await delay(5400);
+        events.push("A-end");
+      });
 
-      const first = readAndClear({ remove: async (path) => {
-        claimed();
-        await waitForRemove;
-        await rm(path);
-      } });
-      await removeClaimed;
-      const second = await readAndClear();
-      releaseRemove();
-      const returned = (await first).concat(second);
+      await delay(30);
+      const second = withLock(dir, async () => {
+        events.push("B-start");
+      });
 
-      assert.deepEqual(returned.map(({ comment }) => comment), [item.comment]);
+      await Promise.all([first, second]);
+      assert.deepEqual(events, ["A-start", "A-end", "B-start"]);
     } finally {
-      if (previousTtl === undefined) delete process.env.FFB_CLAIM_TTL_MS;
-      else process.env.FFB_CLAIM_TTL_MS = previousTtl;
+      if (previousLease === undefined) delete process.env.FFB_LOCK_LEASE_MS;
+      else process.env.FFB_LOCK_LEASE_MS = previousLease;
     }
   });
 });
 
-test("withMirrorLock excludes overlapping critical sections", async () => {
+test("a lock holder leaves a lock owned by someone else intact", async () => {
   await withInbox(async (dir) => {
-    let inFlight = false;
-    let overlapped = false;
-    let releaseFirst;
-    let enteredFirst;
-    const firstEntered = new Promise((resolve) => {
-      enteredFirst = resolve;
-    });
-    const release = new Promise((resolve) => {
-      releaseFirst = resolve;
-    });
-
-    const first = withMirrorLock(dir, async () => {
-      inFlight = true;
-      enteredFirst();
-      await release;
-      inFlight = false;
-    });
-    await firstEntered;
-    const second = withMirrorLock(dir, async () => {
-      overlapped = inFlight;
-    });
-    releaseFirst();
-    await Promise.all([first, second]);
-
-    assert.equal(overlapped, false);
-  });
-});
-
-test("serialized mirror regeneration publishes the current spool after an interleaved clear", async () => {
-  await withInbox(async (dir) => {
-    const item = { comment: "clear me" };
-    let releaseSnapshot;
-    let snapshotTaken;
-    let removed;
-    const waitForSnapshot = new Promise((resolve) => {
-      releaseSnapshot = resolve;
-    });
-    const snapshot = new Promise((resolve) => {
-      snapshotTaken = resolve;
-    });
-    const itemRemoved = new Promise((resolve) => {
-      removed = resolve;
-    });
-    await appendItems([item]);
-
-    const stale = regenerateMirrors(dir, join(dir, "pending"), { afterSnapshot: () => {
-      snapshotTaken();
-      return waitForSnapshot;
-    } });
-    await snapshot;
-    const cleared = readAndClear({ remove: async (path) => {
-      await rm(path);
-      removed();
-    } });
-    await itemRemoved;
-    releaseSnapshot();
-    await Promise.all([stale, cleared]);
-
-    const jsonl = await readFile(join(dir, "inbox.jsonl"), "utf8");
-    assert.deepEqual(jsonl.trim() ? jsonl.trim().split("\n").map((line) => JSON.parse(line)) : [], await peek());
-  });
-});
-
-test("regenerateMirrors skips when the mirror lock cannot be acquired", async () => {
-  await withInbox(async (dir) => {
-    await appendItems([]);
-    await rm(join(dir, "inbox.jsonl"));
-    const lockDir = join(dir, ".mirror.lock");
-    await mkdir(lockDir);
+    const lockDir = join(dir, ".lock");
     try {
-      await Promise.race([
-        regenerateMirrors(dir, join(dir, "pending")),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("mirror regeneration timed out")), 3000)),
-      ]);
-      await assert.rejects(readFile(join(dir, "inbox.jsonl"), "utf8"), { code: "ENOENT" });
+      await withLock(dir, async () => {
+        await writeFile(join(lockDir, "owner"), "FOREIGN-OWNER", "utf8");
+      });
+
+      await stat(lockDir);
+      assert.equal(await readFile(join(lockDir, "owner"), "utf8"), "FOREIGN-OWNER");
     } finally {
-      await rmdir(lockDir);
+      await rm(lockDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test("readAndClear returns delivered items even when lock cleanup fails", async () => {
+  await withInbox(async (dir) => {
+    await appendItems([{ comment: "deliver me" }]);
+    const lockDir = join(dir, ".lock");
+    try {
+      const delivered = await readAndClear({
+        remove: async (target) => {
+          await rm(target);
+          // Sabotage the lock release: leave a stray entry so the finally's
+          // rmdir(lockDir) fails with ENOTEMPTY after the item is delivered.
+          await writeFile(join(lockDir, "stray"), "x", "utf8");
+        },
+      });
+      assert.deepEqual(delivered.map(({ comment }) => comment), ["deliver me"]);
+    } finally {
+      await rm(lockDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test("a non-empty leftover lock is recovered by the next operation", async () => {
+  await withInbox(async (dir) => {
+    const lockDir = join(dir, ".lock");
+    const previousLease = process.env.FFB_LOCK_LEASE_MS;
+    process.env.FFB_LOCK_LEASE_MS = "20";
+    try {
+      // Simulate what a failed release leaves behind: a non-empty, ownerless,
+      // already-stale lock directory (the owner file gone, a stray entry left).
+      await mkdir(lockDir);
+      await writeFile(join(lockDir, "stray"), "x", "utf8");
+      const stale = new Date(Date.now() - 10000);
+      await utimes(lockDir, stale, stale);
+
+      // The next operation must steal (recover) the stale non-empty lock, not wedge.
+      await appendItems([{ comment: "after recovery" }]);
+      assert.deepEqual((await peek()).map(({ comment }) => comment), ["after recovery"]);
+    } finally {
+      if (previousLease === undefined) delete process.env.FFB_LOCK_LEASE_MS;
+      else process.env.FFB_LOCK_LEASE_MS = previousLease;
+      await rm(lockDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test("concurrent spool mutations leave the mirror equal to the final spool", async () => {
+  await withInbox(async (dir) => {
+    for (let iteration = 0; iteration < 20; iteration += 1) {
+      const initial = { comment: "initial " + iteration };
+      const appended = { comment: "appended " + iteration };
+      await appendItems([initial]);
+      await assertMirrorMatchesSpool(dir);
+
+      await Promise.all([appendItems([appended]), readAndClear()]);
+
+      await assertMirrorMatchesSpool(dir);
+      await readAndClear();
+      await assertMirrorMatchesSpool(dir);
     }
   });
 });
