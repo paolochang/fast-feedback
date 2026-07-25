@@ -271,6 +271,30 @@ test("readAndClear returns delivered items even when lock cleanup fails", async 
   });
 });
 
+test("a non-empty leftover lock is recovered by the next operation", async () => {
+  await withInbox(async (dir) => {
+    const lockDir = join(dir, ".lock");
+    const previousLease = process.env.FFB_LOCK_LEASE_MS;
+    process.env.FFB_LOCK_LEASE_MS = "20";
+    try {
+      // Simulate what a failed release leaves behind: a non-empty, ownerless,
+      // already-stale lock directory (the owner file gone, a stray entry left).
+      await mkdir(lockDir);
+      await writeFile(join(lockDir, "stray"), "x", "utf8");
+      const stale = new Date(Date.now() - 10000);
+      await utimes(lockDir, stale, stale);
+
+      // The next operation must steal (recover) the stale non-empty lock, not wedge.
+      await appendItems([{ comment: "after recovery" }]);
+      assert.deepEqual((await peek()).map(({ comment }) => comment), ["after recovery"]);
+    } finally {
+      if (previousLease === undefined) delete process.env.FFB_LOCK_LEASE_MS;
+      else process.env.FFB_LOCK_LEASE_MS = previousLease;
+      await rm(lockDir, { recursive: true, force: true });
+    }
+  });
+});
+
 test("concurrent spool mutations leave the mirror equal to the final spool", async () => {
   await withInbox(async (dir) => {
     for (let iteration = 0; iteration < 20; iteration += 1) {

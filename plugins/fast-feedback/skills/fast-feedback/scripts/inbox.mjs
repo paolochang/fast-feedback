@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rename, rmdir, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 function inboxDir() {
@@ -127,12 +127,10 @@ export async function withLock(dir, run) {
       if (error?.code !== "EEXIST") throw error;
       try {
         if ((await stat(lockDir)).mtimeMs < Date.now() - leaseMs) {
-          try {
-            await rm(ownerFile, { force: true });
-            await rmdir(lockDir);
-          } catch (removeError) {
-            if (removeError?.code !== "ENOENT") throw removeError;
-          }
+          // Recursive+force so a stale lock is recoverable even if it is
+          // non-empty (e.g. an ownerless directory a failed release left behind);
+          // a plain rmdir would throw ENOTEMPTY and wedge every future operation.
+          await rm(lockDir, { recursive: true, force: true });
           continue;
         }
       } catch (statError) {
@@ -152,7 +150,7 @@ export async function withLock(dir, run) {
   } finally {
     // Keep renewing through the release so our own lock cannot go stale (and be
     // stolen + re-acquired by another holder) between the ownership check and the
-    // rmdir — which would otherwise let us clobber the successor's lock. Stop the
+    // removal — which would otherwise let us clobber the successor's lock. Stop the
     // renewal only after we have released, in a nested finally so it never leaks.
     try {
       // Release is best-effort: run() has already produced its result (for
@@ -167,8 +165,9 @@ export async function withLock(dir, run) {
       }
       if (ownsLock) {
         try {
-          await rm(ownerFile, { force: true });
-          await rmdir(lockDir);
+          // Recursive+force so release also clears a non-empty lock in one step
+          // and never leaves an unrecoverable directory behind.
+          await rm(lockDir, { recursive: true, force: true });
         } catch (error) {
           if (error?.code !== "ENOENT") console.error(error);
         }
