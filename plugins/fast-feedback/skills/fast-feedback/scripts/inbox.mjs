@@ -36,12 +36,12 @@ async function recoverAbandonedClaims(pendingDir) {
   const ttlMs = process.env.FFB_CLAIM_TTL_MS === undefined ? 60000 : Number(process.env.FFB_CLAIM_TTL_MS);
   const claims = (await readdir(pendingDir)).map((name) => {
     const match = name.match(/^([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json)\.[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.claimed$/i);
-    return match ? { claimedName: name, name: match[1] } : null;
+    return match ? { claimedName: name } : null;
   }).filter(Boolean);
-  await Promise.all(claims.map(async ({ claimedName, name }) => {
+  await Promise.all(claims.map(async ({ claimedName }) => {
     try {
       if ((await stat(join(pendingDir, claimedName))).mtimeMs >= Date.now() - ttlMs) return;
-      await rename(join(pendingDir, claimedName), join(pendingDir, name));
+      await rename(join(pendingDir, claimedName), join(pendingDir, randomUUID() + ".json"));
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
     }
@@ -138,7 +138,7 @@ export async function count() {
   return (await pendingFiles(pendingDir)).length;
 }
 
-export async function readAndClear() {
+export async function readAndClear({ remove = rm } = {}) {
   const { dir, pendingDir } = await ensureInbox();
   await recoverAbandonedClaims(pendingDir);
   const files = await pendingFiles(pendingDir);
@@ -171,9 +171,9 @@ export async function readAndClear() {
   const readableEntries = entries.filter(Boolean);
   await Promise.all(readableEntries.map(async ({ claimedName }) => {
     try {
-      await rm(join(pendingDir, claimedName));
+      await remove(join(pendingDir, claimedName));
     } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
+      console.error(error);
     }
   }));
   try {

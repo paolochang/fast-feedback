@@ -171,6 +171,28 @@ test("readAndClear quarantines unreadable claims and returns valid items", async
   });
 });
 
+test("readAndClear returns all items when one claimed file cannot be deleted", async () => {
+  await withInbox(async (dir) => {
+    const items = [{ comment: "first" }, { comment: "second" }];
+    let failed = false;
+    await appendItems(items);
+
+    const returned = await readAndClear({ remove: async (path) => {
+      if (!failed) {
+        failed = true;
+        const error = new Error("locked");
+        error.code = "EPERM";
+        throw error;
+      }
+      await rm(path);
+    } });
+
+    assert.equal(failed, true);
+    assert.deepEqual(returned.map(({ comment }) => comment).sort(), ["first", "second"]);
+    assert.equal((await readdir(join(dir, "pending"))).filter((name) => name.endsWith(".claimed")).length, 1);
+  });
+});
+
 test("count, peek, and readAndClear recover expired claims", async () => {
   await withInbox(async (dir) => {
     const item = { comment: "abandoned" };
@@ -183,6 +205,20 @@ test("count, peek, and readAndClear recover expired claims", async () => {
     assert.equal(await count(), 1);
     assert.deepEqual(await peek(), [item]);
     assert.deepEqual(await readAndClear(), [item]);
+  });
+});
+
+test("readAndClear preserves a newer resend when recovering an expired claim", async () => {
+  await withInbox(async (dir) => {
+    const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const claimedName = id + ".json.bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.claimed";
+    const claimedPath = join(dir, "pending", claimedName);
+    await appendItems([]);
+    await writeFile(claimedPath, JSON.stringify({ id, comment: "stale" }), "utf8");
+    await utimes(claimedPath, new Date(Date.now() - 120000), new Date(Date.now() - 120000));
+    await appendItems([{ id, comment: "newer" }]);
+
+    assert.ok((await readAndClear()).some((item) => item.comment === "newer"));
   });
 });
 
