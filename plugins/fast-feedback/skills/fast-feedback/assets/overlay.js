@@ -843,10 +843,16 @@
     if (sendInFlight) { showToast("Sending…", false); return; }
     if (!anns.length) { showToast("Nothing new to send", false); return; }
     var snapshot = anns.map(function (a) {
+      // Freeze the box geometry (document-absolute, scroll-invariant) at flush
+      // start. If the user deletes/clears an annotation while the send is in
+      // flight, its boxEl detaches and getBoundingClientRect() would read zeros —
+      // archiving the highlight collapsed at top-left. Read it once, up front.
+      var r = a.boxEl ? a.boxEl.getBoundingClientRect() : null;
       return {
         ann: a,
         id: a.id,
-        revision: a.revision
+        revision: a.revision,
+        rect: r ? { left: r.left + window.pageXOffset, top: r.top + window.pageYOffset, width: r.width, height: r.height } : null
       };
     });
     var items = snapshot.map(function (entry) {
@@ -871,7 +877,11 @@
     Promise.resolve(request).then(function () {
       if (canSend && toSend.length) {
         sentToInbox = true;
-        toSend.forEach(function (entry) { entry.ann.sentToInbox = true; });
+        // Only mark the revision we actually sent as delivered. If the user edited
+        // this annotation while the send was in flight (edit resets sentToInbox to
+        // false and bumps revision), leave it unsent so the edited comment is
+        // re-delivered to the inbox on the next flush.
+        toSend.forEach(function (entry) { if (entry.ann.revision === entry.revision) entry.ann.sentToInbox = true; });
       }
       archiveStarted = true;
       return capturePng(true).then(function (capture) {
@@ -886,7 +896,7 @@
               id: entry.id,
               n: item.n,
               sel: item.sel,
-              region: captureRegion(entry.ann, capture),
+              region: captureRegion(entry.rect, capture),
               comment: item.comment
             };
           })
@@ -957,13 +967,16 @@
     }
   }
 
-  function captureRegion(ann, capture) {
-    var rect = ann.boxEl.getBoundingClientRect();
+  // rect is the box's document-absolute geometry frozen at flush start
+  // (see sendToAI's snapshot). Passing the stored rect — not the live boxEl —
+  // keeps replay correct even if the annotation was deleted mid-send.
+  function captureRegion(rect, capture) {
+    if (!rect) return { x: 0, y: 0, w: 0, h: 0 };
     var scaleX = capture.w / capture.docW, scaleY = capture.h / capture.docH;
     var pct = function (v, total) { return Math.max(0, Math.min(100, Math.round((v / total) * 10000) / 100)); };
     return {
-      x: pct((rect.left + window.pageXOffset) * scaleX, capture.w),
-      y: pct((rect.top + window.pageYOffset - capture.shiftY) * scaleY, capture.h),
+      x: pct(rect.left * scaleX, capture.w),
+      y: pct((rect.top - capture.shiftY) * scaleY, capture.h),
       w: pct(rect.width * scaleX, capture.w),
       h: pct(rect.height * scaleY, capture.h)
     };
