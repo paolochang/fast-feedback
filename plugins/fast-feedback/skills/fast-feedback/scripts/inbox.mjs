@@ -106,7 +106,7 @@ function buildMarkdown(items) {
   return markdown;
 }
 
-export async function withMirrorLock(dir, run) {
+export async function withMirrorLock(dir, run, onSkip) {
   const lockDir = join(dir, ".mirror.lock");
   const deadline = Date.now() + 2000;
   let acquired = false;
@@ -129,7 +129,10 @@ export async function withMirrorLock(dir, run) {
       await new Promise((resolve) => setTimeout(resolve, 15));
     }
   }
-  if (!acquired) return;
+  if (!acquired) {
+    await onSkip?.();
+    return;
+  }
   try {
     return await run();
   } finally {
@@ -143,17 +146,38 @@ export async function withMirrorLock(dir, run) {
   }
 }
 
+async function writeMirrors(dir, pendingDir) {
+  const items = await readPending(pendingDir);
+  const jsonl = items.map((item) => JSON.stringify(item)).join("\n") + (items.length ? "\n" : "");
+  await Promise.all([
+    writeAtomically(join(dir, "inbox.jsonl"), jsonl),
+    writeAtomically(join(dir, "inbox.md"), buildMarkdown(items)),
+  ]);
+  return items;
+}
+
+async function touch(path) {
+  try {
+    await writeFile(path, "", { flag: "wx" });
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+  }
+}
+
 export async function regenerateMirrors(dir, pendingDir, { afterAcquire } = {}) {
+  const dirtyPath = join(dir, ".mirror.dirty");
   return withMirrorLock(dir, async () => {
     await afterAcquire?.();
-    const items = await readPending(pendingDir);
-    const jsonl = items.map((item) => JSON.stringify(item)).join("\n") + (items.length ? "\n" : "");
-    await Promise.all([
-      writeAtomically(join(dir, "inbox.jsonl"), jsonl),
-      writeAtomically(join(dir, "inbox.md"), buildMarkdown(items)),
-    ]);
-    return items;
-  });
+    const items = await writeMirrors(dir, pendingDir);
+    try {
+      await stat(dirtyPath);
+    } catch (error) {
+      if (error?.code === "ENOENT") return items;
+      throw error;
+    }
+    await rm(dirtyPath, { force: true });
+    return writeMirrors(dir, pendingDir);
+  }, () => touch(dirtyPath));
 }
 
 export async function appendItems(items) {

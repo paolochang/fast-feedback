@@ -287,21 +287,43 @@ test("serialized mirror regeneration publishes the current spool after an interl
   });
 });
 
-test("regenerateMirrors skips when the mirror lock cannot be acquired", async () => {
+test("regenerateMirrors skips and marks dirty when the mirror lock cannot be acquired", async () => {
   await withInbox(async (dir) => {
     await appendItems([]);
     await rm(join(dir, "inbox.jsonl"));
     const lockDir = join(dir, ".mirror.lock");
     await mkdir(lockDir);
     try {
+      await writeFile(
+        join(dir, "pending", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.json"),
+        JSON.stringify({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", comment: "blocked" }),
+        "utf8",
+      );
       await Promise.race([
         regenerateMirrors(dir, join(dir, "pending")),
         new Promise((_, reject) => setTimeout(() => reject(new Error("mirror regeneration timed out")), 3000)),
       ]);
       await assert.rejects(readFile(join(dir, "inbox.jsonl"), "utf8"), { code: "ENOENT" });
+      assert.equal(await readFile(join(dir, ".mirror.dirty"), "utf8"), "");
     } finally {
       await rmdir(lockDir);
     }
+  });
+});
+
+test("regenerateMirrors clears dirty and refreshes the current spool", async () => {
+  await withInbox(async (dir) => {
+    const item = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", comment: "refresh me" };
+    await appendItems([]);
+    await writeFile(join(dir, "pending", item.id + ".json"), JSON.stringify(item), "utf8");
+    await writeFile(join(dir, "inbox.jsonl"), JSON.stringify({ comment: "stale" }) + "\n", "utf8");
+    await writeFile(join(dir, ".mirror.dirty"), "", "utf8");
+
+    await regenerateMirrors(dir, join(dir, "pending"));
+
+    const jsonl = await readFile(join(dir, "inbox.jsonl"), "utf8");
+    assert.deepEqual(jsonl.trim().split("\n").map((line) => JSON.parse(line)), await peek());
+    await assert.rejects(readFile(join(dir, ".mirror.dirty"), "utf8"), { code: "ENOENT" });
   });
 });
 
