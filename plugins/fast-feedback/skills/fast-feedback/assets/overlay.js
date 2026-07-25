@@ -102,8 +102,13 @@
     '.__ffb_hist{cursor:pointer}',
     '.__ffb_histdetail{display:flex;flex-direction:column;gap:8px}',
     '.__ffb_histshot{position:relative;width:100%;line-height:0}',
-    '.__ffb_histshot img{display:block;width:100%;height:auto}',
+    '.__ffb_histshot img{display:block;width:100%;height:auto;cursor:zoom-in}',
     '.__ffb_histshot .__ffb_box{pointer-events:none}',
+    '.__ffb_histlightbox{position:fixed;z-index:2147483647;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center}',
+    '.__ffb_histlightboxshot{position:relative;line-height:0}',
+    '.__ffb_histlightboxshot img{display:block;max-width:92vw;max-height:92vh;width:auto;height:auto;object-fit:contain}',
+    '.__ffb_histlightboxshot .__ffb_box{pointer-events:none}',
+    '.__ffb_histlightboxx{position:absolute;top:12px;right:12px;z-index:1;border:0;background:var(--__ffb_surf);color:var(--__ffb_ink);border-radius:50%;width:30px;height:30px;cursor:pointer;font-size:18px;line-height:1}',
     // confirm
     '.__ffb_confirm{position:fixed;z-index:2147483647;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center}',
     '.__ffb_confirm.open{display:flex}',
@@ -272,7 +277,7 @@
   root.appendChild(panel);
   var itemsEl = panel.querySelector("#__ffb_items");
   var activeListTab = "live", historyRows = null, historyLoading = false, historyError = false;
-  var historyVisibleCount = 10, historyObjectUrls = [], historyObserver = null, historyDetailId = null;
+  var historyVisibleCount = 10, historyObjectUrls = [], historyObserver = null, historyDetailId = null, historyLightbox = null;
 
   // ---- confirm dialog ---------------------------------------------------
   var confirmEl = document.createElement("div");
@@ -584,9 +589,56 @@
   }
 
   function clearHistoryThumbs() {
+    closeHistoryLightbox();
     if (historyObserver) { historyObserver.disconnect(); historyObserver = null; }
     historyObjectUrls.forEach(function (url) { URL.revokeObjectURL(url); });
     historyObjectUrls = [];
+  }
+
+  function appendHistoryBox(container, entry) {
+    var region = entry.region || {}, box = document.createElement("div");
+    box.className = "__ffb_box";
+    box.style.left = Number(region.x) + "%";
+    box.style.top = Number(region.y) + "%";
+    box.style.width = Number(region.w) + "%";
+    box.style.height = Number(region.h) + "%";
+    var badge = document.createElement("div");
+    badge.className = "__ffb_num";
+    badge.textContent = entry.n;
+    box.appendChild(badge);
+    container.appendChild(box);
+  }
+
+  function closeHistoryLightbox() {
+    if (!historyLightbox) return;
+    document.removeEventListener("keydown", historyLightbox.onKeydown);
+    historyLightbox.el.remove();
+    historyLightbox = null;
+  }
+
+  function openHistoryLightbox(url, meta) {
+    closeHistoryLightbox();
+    var lightbox = document.createElement("div");
+    lightbox.className = "__ffb_histlightbox";
+    var close = document.createElement("button");
+    close.className = "__ffb_histlightboxx";
+    close.textContent = "✕";
+    close.title = "Close";
+    var shot = document.createElement("div");
+    shot.className = "__ffb_histlightboxshot";
+    var image = document.createElement("img");
+    image.src = url;
+    image.alt = "Archived feedback screenshot";
+    shot.appendChild(image);
+    (Array.isArray(meta && meta.items) ? meta.items : []).forEach(function (entry) { appendHistoryBox(shot, entry); });
+    lightbox.appendChild(close);
+    lightbox.appendChild(shot);
+    root.appendChild(lightbox);
+    var onKeydown = function (event) { if (event.key === "Escape") closeHistoryLightbox(); };
+    historyLightbox = { el: lightbox, onKeydown: onKeydown };
+    close.onclick = closeHistoryLightbox;
+    lightbox.onclick = function (event) { if (event.target === lightbox) closeHistoryLightbox(); };
+    document.addEventListener("keydown", onKeydown);
   }
 
   function historyTime(ts) {
@@ -675,20 +727,11 @@
       var image = document.createElement("img");
       image.src = url;
       image.alt = "Archived feedback screenshot";
+      image.onclick = function () { openHistoryLightbox(url, meta); };
       shot.appendChild(image);
       var comments = document.createElement("div");
       (Array.isArray(meta && meta.items) ? meta.items : []).forEach(function (entry) {
-        var region = entry.region || {}, box = document.createElement("div");
-        box.className = "__ffb_box";
-        box.style.left = Number(region.x) + "%";
-        box.style.top = Number(region.y) + "%";
-        box.style.width = Number(region.w) + "%";
-        box.style.height = Number(region.h) + "%";
-        var badge = document.createElement("div");
-        badge.className = "__ffb_num";
-        badge.textContent = entry.n;
-        box.appendChild(badge);
-        shot.appendChild(box);
+        appendHistoryBox(shot, entry);
         var comment = document.createElement("div");
         comment.className = "__ffb_item";
         comment.innerHTML = '<div><span class="__ffb_n">[' + esc(String(entry.n)) + ']</span><span class="__ffb_isel">' + esc(String(entry.sel || "")) + '</span></div>' +
