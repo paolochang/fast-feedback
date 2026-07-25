@@ -951,7 +951,20 @@
   // copy tied to the button's user-gesture while the render finishes. If the
   // clipboard is blocked (permissions / not focused / unsupported, e.g. over
   // file://) we fall back to downloading the PNG so the shot is never lost.
+  // Serialize captures: capturePng mutates shared DOM state (hides chrome,
+  // removes the body spacer) and restores it on completion. Two overlapping
+  // captures — e.g. the Screenshot hotkey pressed during the Send flush's
+  // parallel capture — would each snapshot the OTHER's temporary state as the
+  // "original" and restore to it, leaving the overlay hidden / spacer removed.
+  // Chain each capture after the previous one fully settles so they never overlap.
+  var captureChain = Promise.resolve();
   function capturePng(hideBoxes) {
+    var run = function () { return capturePngNow(hideBoxes); };
+    var result = captureChain.then(run, run);
+    captureChain = result.catch(function () {});
+    return result;
+  }
+  function capturePngNow(hideBoxes) {
     var h2c = window.html2canvas;
     if (typeof h2c !== "function") return Promise.reject(new Error("Screenshot needs the bundled html2canvas, which didn't load on this page."));
     var chrome = [bar, panel, form, confirmEl, layer];
