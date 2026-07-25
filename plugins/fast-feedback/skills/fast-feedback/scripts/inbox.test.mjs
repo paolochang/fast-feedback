@@ -251,6 +251,26 @@ test("a lock holder leaves a lock owned by someone else intact", async () => {
   });
 });
 
+test("readAndClear returns delivered items even when lock cleanup fails", async () => {
+  await withInbox(async (dir) => {
+    await appendItems([{ comment: "deliver me" }]);
+    const lockDir = join(dir, ".lock");
+    try {
+      const delivered = await readAndClear({
+        remove: async (target) => {
+          await rm(target);
+          // Sabotage the lock release: leave a stray entry so the finally's
+          // rmdir(lockDir) fails with ENOTEMPTY after the item is delivered.
+          await writeFile(join(lockDir, "stray"), "x", "utf8");
+        },
+      });
+      assert.deepEqual(delivered.map(({ comment }) => comment), ["deliver me"]);
+    } finally {
+      await rm(lockDir, { recursive: true, force: true });
+    }
+  });
+});
+
 test("concurrent spool mutations leave the mirror equal to the final spool", async () => {
   await withInbox(async (dir) => {
     for (let iteration = 0; iteration < 20; iteration += 1) {

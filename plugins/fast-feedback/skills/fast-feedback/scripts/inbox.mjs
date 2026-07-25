@@ -155,18 +155,22 @@ export async function withLock(dir, run) {
     // rmdir — which would otherwise let us clobber the successor's lock. Stop the
     // renewal only after we have released, in a nested finally so it never leaks.
     try {
+      // Release is best-effort: run() has already produced its result (for
+      // readAndClear, the items are already delivered and removed from the spool),
+      // so a cleanup failure must never propagate and discard that result. A lock
+      // left behind is self-healing — the next acquirer steals it after the lease.
       let ownsLock = false;
       try {
         ownsLock = (await readFile(ownerFile, "utf8")) === token;
       } catch (error) {
-        if (error?.code !== "ENOENT") throw error;
+        if (error?.code !== "ENOENT") console.error(error);
       }
       if (ownsLock) {
         try {
           await rm(ownerFile, { force: true });
           await rmdir(lockDir);
         } catch (error) {
-          if (error?.code !== "ENOENT") throw error;
+          if (error?.code !== "ENOENT") console.error(error);
         }
       }
     } finally {
