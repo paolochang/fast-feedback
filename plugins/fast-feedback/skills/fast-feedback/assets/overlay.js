@@ -491,9 +491,20 @@
     function requestStore(mode, action) {
       return openDb().then(function (db) {
         return new Promise(function (resolve, reject) {
-          var request = action(db.transaction("history", mode).objectStore("history"));
-          request.onsuccess = function () { resolve(request.result); };
+          // Resolve on the TRANSACTION's completion, not the request's onsuccess:
+          // a put request can succeed yet the transaction still abort at commit
+          // time (quota / storage failure). Resolving on the request alone would
+          // report a durable archive that never committed, and sendToAI would
+          // clear the annotations — silent data loss. oncomplete fires only after
+          // a durable commit; onabort/onerror reject.
+          var tx = db.transaction("history", mode);
+          var request = action(tx.objectStore("history"));
+          var result;
+          request.onsuccess = function () { result = request.result; };
           request.onerror = function () { reject(request.error); };
+          tx.oncomplete = function () { resolve(result); };
+          tx.onabort = function () { reject(tx.error || new Error("IndexedDB transaction aborted")); };
+          tx.onerror = function () { reject(tx.error || new Error("IndexedDB transaction failed")); };
         });
       });
     }
@@ -957,10 +968,16 @@
       chrome.forEach(function (n, i) { n.style.visibility = vis[i]; });
       document.body.style.marginTop = mt;
     };
+    // Freeze the document dimensions BEFORE html2canvas clones the DOM: the canvas
+    // reflects the document at render start, so normalizing regions against a
+    // later live scrollWidth/Height (an SPA resize mid-render) would shift every
+    // box. Read after the spacer removal above so it matches the rendered canvas.
+    var captureDocW = document.documentElement.scrollWidth || 1;
+    var captureDocH = document.documentElement.scrollHeight || 1;
     try {
       return Promise.resolve(h2c(document.documentElement, { backgroundColor: null, useCORS: true, logging: false, scale: window.devicePixelRatio || 1 }))
         .then(function (canvas) {
-          var capture = { w: canvas.width, h: canvas.height, docW: document.documentElement.scrollWidth || 1, docH: document.documentElement.scrollHeight || 1, shiftY: captureShiftY };
+          var capture = { w: canvas.width, h: canvas.height, docW: captureDocW, docH: captureDocH, shiftY: captureShiftY };
           restore();
           return new Promise(function (res, rej) {
             canvas.toBlob(function (blob) { blob ? res({ blob: blob, capture: capture }) : rej(new Error("toBlob returned null")); }, "image/png");
