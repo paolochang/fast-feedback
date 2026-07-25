@@ -108,15 +108,24 @@ function buildMarkdown(items) {
 
 export async function withLock(dir, run) {
   const lockDir = join(dir, ".lock");
+  const ownerFile = join(lockDir, "owner");
+  const token = randomUUID();
+  const leaseMs = process.env.FFB_LOCK_LEASE_MS === undefined ? 5000 : Number(process.env.FFB_LOCK_LEASE_MS);
   for (;;) {
     try {
       await mkdir(lockDir);
+      await writeFile(ownerFile, token, "utf8");
       break;
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
       try {
-        if ((await stat(lockDir)).mtimeMs < Date.now() - 5000) {
-          await rmdir(lockDir);
+        if ((await stat(lockDir)).mtimeMs < Date.now() - leaseMs) {
+          try {
+            await rm(ownerFile, { force: true });
+            await rmdir(lockDir);
+          } catch (removeError) {
+            if (removeError?.code !== "ENOENT") throw removeError;
+          }
           continue;
         }
       } catch (statError) {
@@ -126,13 +135,35 @@ export async function withLock(dir, run) {
       await new Promise((resolve) => setTimeout(resolve, 15));
     }
   }
+  const renewMs = Math.max(15, Math.floor(leaseMs / 2));
+  const renew = setInterval(() => {
+    utimes(lockDir, new Date(), new Date()).catch(() => {});
+  }, renewMs);
+  if (typeof renew.unref === "function") renew.unref();
   try {
     return await run();
   } finally {
+    // Keep renewing through the release so our own lock cannot go stale (and be
+    // stolen + re-acquired by another holder) between the ownership check and the
+    // rmdir — which would otherwise let us clobber the successor's lock. Stop the
+    // renewal only after we have released, in a nested finally so it never leaks.
     try {
-      await rmdir(lockDir);
-    } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
+      let ownsLock = false;
+      try {
+        ownsLock = (await readFile(ownerFile, "utf8")) === token;
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+      if (ownsLock) {
+        try {
+          await rm(ownerFile, { force: true });
+          await rmdir(lockDir);
+        } catch (error) {
+          if (error?.code !== "ENOENT") throw error;
+        }
+      }
+    } finally {
+      clearInterval(renew);
     }
   }
 }

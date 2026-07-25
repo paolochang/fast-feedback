@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rmdir, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rmdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { appendItems, count, peek, readAndClear } from "./inbox.mjs";
+import { appendItems, count, peek, readAndClear, withLock } from "./inbox.mjs";
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function withInbox(run) {
   const dir = await mkdtemp(join(tmpdir(), "ffb-inbox-"));
@@ -204,6 +206,48 @@ test("spool operations wait for the operation lock instead of skipping", async (
     await rmdir(lockDir);
     await append;
     assert.deepEqual((await peek()).map(({ comment }) => comment), ["wait for lock"]);
+  });
+});
+
+test("a live lock holder renews its lease so a contender does not overlap", async () => {
+  await withInbox(async (dir) => {
+    const previousLease = process.env.FFB_LOCK_LEASE_MS;
+    process.env.FFB_LOCK_LEASE_MS = "120";
+    try {
+      const events = [];
+      const first = withLock(dir, async () => {
+        events.push("A-start");
+        await delay(5400);
+        events.push("A-end");
+      });
+
+      await delay(30);
+      const second = withLock(dir, async () => {
+        events.push("B-start");
+      });
+
+      await Promise.all([first, second]);
+      assert.deepEqual(events, ["A-start", "A-end", "B-start"]);
+    } finally {
+      if (previousLease === undefined) delete process.env.FFB_LOCK_LEASE_MS;
+      else process.env.FFB_LOCK_LEASE_MS = previousLease;
+    }
+  });
+});
+
+test("a lock holder leaves a lock owned by someone else intact", async () => {
+  await withInbox(async (dir) => {
+    const lockDir = join(dir, ".lock");
+    try {
+      await withLock(dir, async () => {
+        await writeFile(join(lockDir, "owner"), "FOREIGN-OWNER", "utf8");
+      });
+
+      await stat(lockDir);
+      assert.equal(await readFile(join(lockDir, "owner"), "utf8"), "FOREIGN-OWNER");
+    } finally {
+      await rm(lockDir, { recursive: true, force: true });
+    }
   });
 });
 
