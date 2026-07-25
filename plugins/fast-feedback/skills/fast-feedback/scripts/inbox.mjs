@@ -143,10 +143,10 @@ export async function withMirrorLock(dir, run) {
   }
 }
 
-export async function regenerateMirrors(dir, pendingDir, { afterSnapshot } = {}) {
+export async function regenerateMirrors(dir, pendingDir, { afterAcquire } = {}) {
   return withMirrorLock(dir, async () => {
+    await afterAcquire?.();
     const items = await readPending(pendingDir);
-    await afterSnapshot?.();
     const jsonl = items.map((item) => JSON.stringify(item)).join("\n") + (items.length ? "\n" : "");
     await Promise.all([
       writeAtomically(join(dir, "inbox.jsonl"), jsonl),
@@ -219,7 +219,6 @@ export async function readAndClear({ remove = rm } = {}) {
       await remove(join(pendingDir, entry.claimedName));
       return entry;
     } catch (error) {
-      if (error?.code === "ENOENT") return entry;
       console.error(error);
       return null;
     }
