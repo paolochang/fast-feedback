@@ -45,7 +45,10 @@ function request({ port, method = "POST", path = "/__ffb__/history", headers = {
     const req = http.request({ host: "127.0.0.1", port, method, path, headers }, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(chunk));
-      res.on("end", () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
+      res.on("end", () => {
+        const buffer = Buffer.concat(chunks);
+        resolve({ status: res.statusCode, headers: res.headers, buffer, body: buffer.toString("utf8") });
+      });
     });
     req.on("error", reject);
     req.end(body);
@@ -184,6 +187,91 @@ test("POST /__ffb__/history rejects bodies over the cap from both length checks"
         headers: { ...headers, "transfer-encoding": "chunked" },
         body: oversizedBody,
       })).status, 413);
+    } finally {
+      await proxy.close();
+    }
+  });
+});
+
+test("GET /__ffb__/history returns only done batch summaries, newest first", async () => {
+  await withHistory(async (dir) => {
+    const proxy = await startProxy(dir);
+    try {
+      const older = meta("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "2026-07-25T10:00:00.000Z");
+      const newer = meta("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "2026-07-25T11:00:00.000Z");
+      newer.items[0].comment = "  New feedback  ";
+      const incomplete = meta("cccccccc-cccc-4ccc-8ccc-cccccccccccc", "2026-07-25T12:00:00.000Z");
+      await writeBatch(older, Buffer.from([1]));
+      await writeBatch(newer, Buffer.from([2]));
+      await mkdir(join(dir, "history"), { recursive: true });
+      await writeFile(join(dir, "history", incomplete.id + ".json"), JSON.stringify(incomplete));
+
+      assert.equal((await request({ port: proxy.port, method: "GET", path: "/__ffb__/history" })).status, 403);
+      const response = await request({
+        port: proxy.port,
+        method: "GET",
+        path: "/__ffb__/history",
+        headers: authorizedHeaders(proxy.port, proxy.token),
+      });
+
+      assert.equal(response.status, 200);
+      assert.deepEqual(JSON.parse(response.body), [
+        { id: newer.id, ts: newer.ts, url: newer.url, count: 1, preview: "New feedback" },
+        { id: older.id, ts: older.ts, url: older.url, count: 1, preview: "Looks good" },
+      ]);
+    } finally {
+      await proxy.close();
+    }
+  });
+});
+
+test("GET history detail returns a done batch's metadata and image", async () => {
+  await withHistory(async (dir) => {
+    const proxy = await startProxy(dir);
+    try {
+      const batch = meta("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+      const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+      await writeBatch(batch, png);
+      const headers = authorizedHeaders(proxy.port, proxy.token);
+
+      const metaResponse = await request({ port: proxy.port, method: "GET", path: "/__ffb__/history/" + batch.id + ".json", headers });
+      assert.equal(metaResponse.status, 200);
+      assert.deepEqual(JSON.parse(metaResponse.body), batch);
+
+      const imageResponse = await request({ port: proxy.port, method: "GET", path: "/__ffb__/history/" + batch.id + ".png", headers });
+      assert.equal(imageResponse.status, 200);
+      assert.equal(imageResponse.headers["content-type"], "image/png");
+      assert.deepEqual(imageResponse.buffer, png);
+    } finally {
+      await proxy.close();
+    }
+  });
+});
+
+test("GET history detail rejects missing, unmarked, malformed, and unauthorized requests", async () => {
+  await withHistory(async (dir) => {
+    const proxy = await startProxy(dir);
+    try {
+      const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      const unmarked = meta(id);
+      await mkdir(join(dir, "history"), { recursive: true });
+      await writeFile(join(dir, "history", id + ".json"), JSON.stringify(unmarked));
+      await writeFile(join(dir, "history", id + ".png"), Buffer.from([1]));
+      const headers = authorizedHeaders(proxy.port, proxy.token);
+
+      for (const path of ["/__ffb__/history/unknown.json", "/__ffb__/history/../../secrets.png"]) {
+        assert.equal((await request({ port: proxy.port, method: "GET", path, headers })).status, 400);
+      }
+      for (const path of ["/__ffb__/history/" + id + ".json", "/__ffb__/history/" + id + ".png"]) {
+        assert.equal((await request({ port: proxy.port, method: "GET", path, headers })).status, 404);
+        assert.equal((await request({ port: proxy.port, method: "GET", path })).status, 403);
+      }
+      assert.equal((await request({
+        port: proxy.port,
+        method: "GET",
+        path: "/__ffb__/history/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.json",
+        headers,
+      })).status, 404);
     } finally {
       await proxy.close();
     }

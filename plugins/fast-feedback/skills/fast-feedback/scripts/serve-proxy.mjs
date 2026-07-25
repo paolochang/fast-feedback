@@ -24,8 +24,8 @@
 import http from "node:http";
 import net from "node:net";
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { createReadStream, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bootAssignments, applyUpdate, saveScreenshot } from "./settings.mjs";
 import * as inbox from "./inbox.mjs";
@@ -63,6 +63,21 @@ export const FFB_SEND_TOKEN = randomBytes(24).toString("hex");
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, { "content-type": "application/json" });
   response.end(JSON.stringify(payload));
+}
+
+function historySummary(meta) {
+  const items = Array.isArray(meta.items) ? meta.items : [];
+  const preview = items.find((item) => typeof item?.comment === "string" && item.comment.trim())?.comment.trim().slice(0, 160) || "";
+  return { id: meta.id, ts: meta.ts, url: meta.url, count: items.length, preview };
+}
+
+async function markedHistoryBatch(id) {
+  return (await history.listBatches()).find((batch) => batch.id.toLowerCase() === id.toLowerCase());
+}
+
+function historyPngPath(id) {
+  const inboxDir = process.env.FFB_INBOX ? resolve(process.env.FFB_INBOX) : join(process.cwd(), ".ffb");
+  return join(inboxDir, "history", id + ".png");
 }
 
 function parseHistoryBody(body) {
@@ -120,6 +135,56 @@ function bootScript() {
 const STRIP = new Set(["x-frame-options", "content-security-policy", "content-security-policy-report-only"]);
 
 const server = http.createServer(function (creq, cres) {
+  // History reads stay on the loopback-only proxy. The ID is validated before
+  // it can become part of a file path, and listBatches limits visibility to
+  // completion-marker-backed batches.
+  if (creq.method === "GET" && creq.url.startsWith("/__ffb__/history")) {
+    if (creq.headers["x-ffb-token"] !== FFB_SEND_TOKEN || !isOwnProxyOrigin(creq.headers, PORT)) {
+      sendJson(cres, 403, { error: "forbidden" });
+      return;
+    }
+    if (creq.url === "/__ffb__/history") {
+      history.listBatches().then((batches) => {
+        sendJson(cres, 200, batches.map(historySummary));
+      }).catch(() => {
+        sendJson(cres, 500, { error: "could not read history" });
+      });
+      return;
+    }
+
+    const match = creq.url.match(/^\/__ffb__\/history\/([^/]+)\.(json|png)$/);
+    if (!match || !history.isUuid(match[1])) {
+      sendJson(cres, 400, { error: "batch id must be a UUID" });
+      return;
+    }
+    const [, id, extension] = match;
+    markedHistoryBatch(id).then((batch) => {
+      if (!batch) {
+        sendJson(cres, 404, { error: "history batch not found" });
+        return;
+      }
+      if (extension === "json") {
+        sendJson(cres, 200, batch);
+        return;
+      }
+      const stream = createReadStream(historyPngPath(id));
+      stream.once("open", () => {
+        cres.writeHead(200, { "content-type": "image/png" });
+        stream.pipe(cres);
+      });
+      stream.once("error", (error) => {
+        if (cres.headersSent) {
+          cres.destroy(error);
+          return;
+        }
+        sendJson(cres, error?.code === "ENOENT" ? 404 : 500, { error: error?.code === "ENOENT" ? "history batch not found" : "could not read history" });
+      });
+    }).catch(() => {
+      sendJson(cres, 500, { error: "could not read history" });
+    });
+    return;
+  }
+
   // Feedback submissions stay on the loopback-only proxy. Check all request
   // guards before buffering/parsing a body, and never forward this route.
   if (creq.method === "POST" && creq.url === "/__ffb__/send") {
