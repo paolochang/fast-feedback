@@ -29,6 +29,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bootAssignments, applyUpdate, saveScreenshot } from "./settings.mjs";
 import * as inbox from "./inbox.mjs";
+import * as history from "./history.mjs";
 import { isLoopbackHost, isOwnProxyOrigin } from "./proxy-guards.mjs";
 
 const argv = process.argv.slice(2);
@@ -53,6 +54,7 @@ const PORT = parseInt(opt("--port", "5000"), 10);
 const THOST = targetUrl.hostname;
 const TPORT = targetUrl.port || "80";
 const MAX_SEND_BODY_BYTES = 256 * 1024;
+const MAX_HISTORY_BODY_BYTES = 12 * 1024 * 1024;
 
 // TASK-02 can inject this into window.__FFB_SEND when it builds the client boot
 // script. It is minted once for each proxy process and never logged.
@@ -61,6 +63,25 @@ export const FFB_SEND_TOKEN = randomBytes(24).toString("hex");
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, { "content-type": "application/json" });
   response.end(JSON.stringify(payload));
+}
+
+function parseHistoryBody(body) {
+  const newline = body.indexOf(0x0a);
+  if (newline < 1) throw new TypeError("invalid history framing");
+  const lengthText = body.subarray(0, newline).toString("ascii");
+  if (!/^\d+$/.test(lengthText)) throw new TypeError("invalid history framing");
+  const jsonLength = Number(lengthText);
+  const jsonStart = newline + 1;
+  const jsonEnd = jsonStart + jsonLength;
+  if (!Number.isSafeInteger(jsonLength) || jsonEnd > body.length) throw new TypeError("invalid history framing");
+  let meta;
+  try {
+    meta = JSON.parse(body.subarray(jsonStart, jsonEnd).toString("utf8"));
+  } catch {
+    throw new TypeError("invalid history metadata");
+  }
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) throw new TypeError("invalid history metadata");
+  return { meta, png: body.subarray(jsonEnd) };
 }
 
 // Build the overlay bundle exactly like the other modes: vendored html2canvas
@@ -147,6 +168,59 @@ const server = http.createServer(function (creq, cres) {
         sendJson(cres, 200, { ok: true, count: await inbox.count() });
       } catch (error) {
         sendJson(cres, 500, { error: "could not store feedback" });
+      }
+    });
+    return;
+  }
+
+  // History uploads use a length-prefixed metadata frame followed by raw PNG.
+  // This stays on the loopback-only proxy and is never forwarded upstream.
+  if (creq.method === "POST" && creq.url === "/__ffb__/history") {
+    if (creq.headers["x-ffb-token"] !== FFB_SEND_TOKEN || !isOwnProxyOrigin(creq.headers, PORT)) {
+      sendJson(cres, 403, { error: "forbidden" });
+      return;
+    }
+    const contentType = String(creq.headers["content-type"] || "").split(";", 1)[0].trim().toLowerCase();
+    if (contentType !== "application/x-ffb-history" && contentType !== "application/octet-stream") {
+      sendJson(cres, 415, { error: "content-type must be application/x-ffb-history" });
+      return;
+    }
+    if (Number(creq.headers["content-length"] || 0) > MAX_HISTORY_BODY_BYTES) {
+      sendJson(cres, 413, { error: "request body too large" });
+      return;
+    }
+
+    let size = 0;
+    let tooLarge = false;
+    const chunks = [];
+    creq.on("data", function (chunk) {
+      if (tooLarge) return;
+      size += chunk.length;
+      if (size > MAX_HISTORY_BODY_BYTES) {
+        tooLarge = true;
+        sendJson(cres, 413, { error: "request body too large" });
+        return;
+      }
+      chunks.push(chunk);
+    });
+    creq.on("end", async function () {
+      if (tooLarge) return;
+      let batch;
+      try {
+        batch = parseHistoryBody(Buffer.concat(chunks));
+      } catch {
+        sendJson(cres, 400, { error: "invalid history framing" });
+        return;
+      }
+      if (!history.isUuid(batch.meta.id)) {
+        sendJson(cres, 400, { error: "batch id must be a UUID" });
+        return;
+      }
+      try {
+        await history.writeBatch(batch.meta, batch.png);
+        sendJson(cres, 200, { ok: true });
+      } catch (error) {
+        sendJson(cres, 500, { error: "could not store history" });
       }
     });
     return;
