@@ -209,7 +209,6 @@
     '<button id="__ffb_toggle">Write</button>' +
     '<button id="__ffb_listbtn">List<span class="__ffb_cnt" id="__ffb_cnt">0</span></button>' +
     '<button id="__ffb_copybtn">Copy All</button>' +
-    '<button id="__ffb_sendbtn">Send to AI</button>' +
     '<button id="__ffb_shotbtn">Screenshot</button>' +
     '<button id="__ffb_setbtn">⚙</button>';
   root.appendChild(bar);
@@ -253,7 +252,9 @@
     '<button class="__ffb_btn" id="__ffb_pcopy" style="padding:3px 9px">Copy</button>' +
     '<button class="__ffb_btn" id="__ffb_pclear" style="padding:3px 9px">Clear</button>' +
     '<button class="__ffb_x" title="Close">✕</button></div>' +
-    '<div class="__ffb_list" id="__ffb_items"></div>';
+    '<div class="__ffb_list" id="__ffb_items"></div>' +
+    '<div id="__ffb_foot" style="padding:10px 12px;border-top:1px solid var(--__ffb_line);display:flex">' +
+    '<button class="__ffb_btn primary" id="__ffb_psend" title="Send new feedback to AI" style="flex:1;padding:8px 12px">Send to AI</button></div>';
   root.appendChild(panel);
   var itemsEl = panel.querySelector("#__ffb_items");
 
@@ -474,6 +475,7 @@
     });
   }
   panel.querySelector(".__ffb_x").onclick = function () { panel.classList.remove("open"); };
+  panel.querySelector("#__ffb_psend").onclick = sendToAI;
   panel.querySelector("#__ffb_pcopy").onclick = copyAll;
   panel.querySelector("#__ffb_pclear").onclick = clearAll;
 
@@ -637,7 +639,6 @@
   bar.querySelector("#__ffb_toggle").onclick = function () { setActive(!active); };
   bar.querySelector("#__ffb_listbtn").onclick = toggleList;
   bar.querySelector("#__ffb_copybtn").onclick = copyAll;
-  bar.querySelector("#__ffb_sendbtn").onclick = sendToAI;
   bar.querySelector("#__ffb_shotbtn").onclick = takeScreenshot;
   bar.querySelector("#__ffb_setbtn").onclick = openSettings;
 
@@ -1037,7 +1038,6 @@
     __ffb_toggle: { action: "write", desc: "Arm the highlight cursor" },
     __ffb_listbtn: { action: "list", desc: "Open the feedback list" },
     __ffb_copybtn: { action: "copy", desc: "Copy all feedback" },
-    __ffb_sendbtn: { action: "send", desc: "Send new feedback to AI" },
     __ffb_shotbtn: { action: "screenshot", desc: "Screenshot to clipboard" },
     __ffb_setbtn: { action: "settings", desc: "Settings" }
   };
