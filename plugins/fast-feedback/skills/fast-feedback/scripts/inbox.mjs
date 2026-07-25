@@ -106,6 +106,13 @@ function buildMarkdown(items) {
   return markdown;
 }
 
+// Best-effort serializer for the DERIVED mirror (inbox.jsonl / inbox.md) — a
+// human-only view that no MCP tool reads; peek/count/readAndClear read the spool
+// directly. Exactly-once delivery is owned by claim-by-rename in readAndClear (an
+// atomic single-winner rename with ENOENT -> skip), NOT by this lock. So a
+// pathological stall that lets two operations overlap here can at worst leave a
+// transiently stale mirror, which the next operation's writeMirrors() self-heals;
+// it can never cause duplicate delivery or spool corruption.
 export async function withLock(dir, run) {
   const lockDir = join(dir, ".lock");
   const ownerFile = join(lockDir, "owner");
