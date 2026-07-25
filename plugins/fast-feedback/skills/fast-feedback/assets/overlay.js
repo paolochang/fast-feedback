@@ -449,6 +449,92 @@
   }
   function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
 
+  function hasIndexedDb() {
+    try { return !!window.indexedDB; } catch (e) { return false; }
+  }
+
+  var historyStore = (function () {
+    var dbPromise;
+
+    function openDb() {
+      if (!dbPromise) {
+        dbPromise = new Promise(function (resolve, reject) {
+          var request;
+          try {
+            if (!hasIndexedDb()) throw new Error("IndexedDB is unavailable");
+            request = window.indexedDB.open("ffb", 1);
+          } catch (e) {
+            reject(e);
+            return;
+          }
+          request.onupgradeneeded = function () {
+            var db = request.result;
+            if (!db.objectStoreNames.contains("history")) db.createObjectStore("history", { keyPath: "id" });
+          };
+          request.onsuccess = function () { resolve(request.result); };
+          request.onerror = function () { reject(request.error); };
+        });
+      }
+      return dbPromise;
+    }
+
+    function requestStore(mode, action) {
+      return openDb().then(function (db) {
+        return new Promise(function (resolve, reject) {
+          var request = action(db.transaction("history", mode).objectStore("history"));
+          request.onsuccess = function () { resolve(request.result); };
+          request.onerror = function () { reject(request.error); };
+        });
+      });
+    }
+
+    function getRecord(id) {
+      return requestStore("readonly", function (store) { return store.get(id); });
+    }
+
+    return {
+      archive: function (meta, pngBlob) {
+        if (typeof window.__FFB_ARCHIVE === "function") {
+          var json = new TextEncoder().encode(JSON.stringify(meta));
+          var framing = new TextEncoder().encode(String(json.length) + "\n");
+          try {
+            return Promise.resolve(window.__FFB_ARCHIVE(new Blob([framing, json, pngBlob], { type: "application/x-ffb-history" })));
+          } catch (e) {
+            return Promise.reject(e);
+          }
+        }
+        return requestStore("readwrite", function (store) { return store.put({ id: meta.id, meta: meta, pngBlob: pngBlob }); });
+      },
+      list: function () {
+        if (typeof window.__FFB_HISTORY_LIST === "function") {
+          try { return Promise.resolve(window.__FFB_HISTORY_LIST()); } catch (e) { return Promise.reject(e); }
+        }
+        return requestStore("readonly", function (store) { return store.getAll(); }).then(function (records) {
+          return records.map(function (record) {
+            var meta = record.meta || {}, preview = "";
+            (Array.isArray(meta.items) ? meta.items : []).some(function (item) {
+              if (String(item.comment || "").trim()) { preview = item.comment; return true; }
+              return false;
+            });
+            return { id: record.id, ts: meta.ts, url: meta.url, count: (meta.items || []).length, preview: preview };
+          }).sort(function (a, b) { return (Date.parse(b.ts) || 0) - (Date.parse(a.ts) || 0); });
+        });
+      },
+      getMeta: function (id) {
+        if (typeof window.__FFB_HISTORY_META === "function") {
+          try { return Promise.resolve(window.__FFB_HISTORY_META(id)); } catch (e) { return Promise.reject(e); }
+        }
+        return getRecord(id).then(function (record) { return record && record.meta; });
+      },
+      getBlob: function (id) {
+        if (typeof window.__FFB_HISTORY_BLOB === "function") {
+          try { return Promise.resolve(window.__FFB_HISTORY_BLOB(id)); } catch (e) { return Promise.reject(e); }
+        }
+        return getRecord(id).then(function (record) { return record && record.pngBlob; });
+      }
+    };
+  }());
+
   function renderList() {
     updateCount();
     if (activeListTab === "history") { renderHistory(); return; }
@@ -511,7 +597,7 @@
   function loadHistoryThumb(img, id) {
     if (img.getAttribute("data-loading")) return;
     img.setAttribute("data-loading", "1");
-    Promise.resolve(window.__FFB_HISTORY_BLOB(id)).then(function (blob) {
+    historyStore.getBlob(id).then(function (blob) {
       var url = URL.createObjectURL(blob);
       if (!img.isConnected || activeListTab !== "history") { URL.revokeObjectURL(url); return; }
       historyObjectUrls.push(url);
@@ -522,7 +608,6 @@
   }
 
   function observeHistoryThumb(img, id) {
-    if (typeof window.__FFB_HISTORY_BLOB !== "function") return;
     if (typeof IntersectionObserver !== "function") { loadHistoryThumb(img, id); return; }
     if (!historyObserver) {
       historyObserver = new IntersectionObserver(function (entries) {
@@ -571,13 +656,9 @@
   function renderHistoryDetail(id) {
     clearHistoryThumbs();
     itemsEl.innerHTML = '<div class="__ffb_empty">Loading archived feedback…</div>';
-    if (typeof window.__FFB_HISTORY_META !== "function" || typeof window.__FFB_HISTORY_BLOB !== "function") {
-      itemsEl.innerHTML = '<div class="__ffb_empty">Could not load this archived feedback.</div>';
-      return;
-    }
     Promise.all([
-      Promise.resolve().then(function () { return window.__FFB_HISTORY_META(id); }),
-      Promise.resolve().then(function () { return window.__FFB_HISTORY_BLOB(id); })
+      historyStore.getMeta(id),
+      historyStore.getBlob(id)
     ]).then(function (result) {
       var meta = result[0], blob = result[1], url = URL.createObjectURL(blob);
       if (historyDetailId !== id || activeListTab !== "history" || !panel.classList.contains("open")) { URL.revokeObjectURL(url); return; }
@@ -629,7 +710,7 @@
     clearHistoryThumbs();
     itemsEl.innerHTML = "";
     if (historyDetailId !== null) { renderHistoryDetail(historyDetailId); return; }
-    if (typeof window.__FFB_HISTORY_LIST !== "function") {
+    if (typeof window.__FFB_HISTORY_LIST !== "function" && !hasIndexedDb()) {
       itemsEl.innerHTML = '<div class="__ffb_empty">History is available when Fast Feedback is served through the proxy.</div>';
       return;
     }
@@ -638,7 +719,7 @@
     if (historyRows) { renderHistoryRows(); return; }
     historyLoading = true;
     itemsEl.innerHTML = '<div class="__ffb_empty">Loading history…</div>';
-    Promise.resolve(window.__FFB_HISTORY_LIST()).then(function (rows) {
+    historyStore.list().then(function (rows) {
       historyRows = Array.isArray(rows) ? rows.slice().sort(function (a, b) { return (Date.parse(b.ts) || 0) - (Date.parse(a.ts) || 0); }) : [];
       historyLoading = false;
       if (activeListTab === "history") renderList();
@@ -702,11 +783,13 @@
   }
 
   // ---- send to AI --------------------------------------------------------
-  // Live/proxy mode injects __FFB_SEND. File and console modes keep Copy All as
-  // their universal fallback, so never assume that function exists here.
+  // Live/proxy mode injects __FFB_SEND. File and console modes archive locally
+  // through historyStore, keeping Copy All as the universal fallback.
   var sendInFlight = false;
   function sendToAI() {
-    if (typeof window.__FFB_SEND !== "function") { showToast("No server — use Copy All", false); return; }
+    var canSend = typeof window.__FFB_SEND === "function";
+    var canArchive = typeof window.__FFB_ARCHIVE === "function" || hasIndexedDb();
+    if (!canSend && !canArchive) { showToast("No server — use Copy All", false); return; }
     if (sendInFlight) { showToast("Sending…", false); return; }
     if (!anns.length) { showToast("Nothing new to send", false); return; }
     var snapshot = anns.map(function (a) {
@@ -723,9 +806,10 @@
     var toSend = snapshot.filter(function (entry) { return !entry.ann.sentToInbox; });
     var request;
     var sentToInbox = false;
+    var archiveStarted = false;
     sendInFlight = true;
     try {
-      request = toSend.length ? window.__FFB_SEND(toSend.map(function (entry) {
+      request = canSend && toSend.length ? window.__FFB_SEND(toSend.map(function (entry) {
         var a = entry.ann;
         return { id: entry.id, n: a.n, sel: a.sel, region: a.region, comment: a.comment, url: location.href, ts: new Date().toISOString() };
       })) : null;
@@ -735,9 +819,11 @@
       return;
     }
     Promise.resolve(request).then(function () {
-      sentToInbox = true;
-      toSend.forEach(function (entry) { entry.ann.sentToInbox = true; });
-      if (typeof window.__FFB_ARCHIVE !== "function") return null;
+      if (canSend && toSend.length) {
+        sentToInbox = true;
+        toSend.forEach(function (entry) { entry.ann.sentToInbox = true; });
+      }
+      archiveStarted = true;
       return capturePng(true).then(function (capture) {
         var meta = {
           id: crypto.randomUUID(),
@@ -755,9 +841,7 @@
             };
           })
         };
-        var json = new TextEncoder().encode(JSON.stringify(meta));
-        var framing = new TextEncoder().encode(String(json.length) + "\n");
-        return window.__FFB_ARCHIVE(new Blob([framing, json, capture.blob], { type: "application/x-ffb-history" }));
+        return historyStore.archive(meta, capture.blob);
       });
     }).then(function () {
       var flushed = snapshot.filter(function (entry) { return entry.ann.revision === entry.revision && anns.indexOf(entry.ann) !== -1; });
@@ -767,9 +851,9 @@
       historyError = false;
       historyVisibleCount = 10;
       renderList();
-      showToast("Sent " + items.length + " items ✓", false);
+      showToast((sentToInbox ? "Sent " : "Archived ") + items.length + " items ✓", false);
     }).catch(function () {
-      showToast(sentToInbox ? "Archive failed — items kept" : "Send failed — items kept", true);
+      showToast(archiveStarted ? "Archive failed — items kept" : "Send failed — items kept", true);
     }).then(function () {
       sendInFlight = false;
     });
