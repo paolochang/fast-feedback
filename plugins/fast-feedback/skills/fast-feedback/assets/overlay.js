@@ -852,6 +852,13 @@
     var canArchive = typeof window.__FFB_ARCHIVE === "function" || hasIndexedDb();
     if (!canSend && !canArchive) { showToast("No server — use Copy All", false); return; }
     if (sendInFlight) { showToast("Sending…", false); return; }
+    // Don't start a flush while a manual Screenshot capture is running: captures
+    // serialize (they need contradictory box visibility), so the archive capture
+    // would queue AFTER we froze the rects/URL and dispatched the send — a page
+    // change during that delay would archive T0 regions over a newer screenshot.
+    // When no capture is active the archive capture starts immediately (chain
+    // free), keeping the snapshot coherent. Rare — needs a near-simultaneous click.
+    if (capturesInFlight > 0) { showToast("Screenshot in progress — try again", false); return; }
     if (!anns.length) { showToast("Nothing new to send", false); return; }
     var snapshot = anns.map(function (a) {
       // Freeze the box geometry (document-absolute, scroll-invariant) at flush
@@ -958,10 +965,14 @@
   // "original" and restore to it, leaving the overlay hidden / spacer removed.
   // Chain each capture after the previous one fully settles so they never overlap.
   var captureChain = Promise.resolve();
+  var capturesInFlight = 0;   // running OR queued; Send bails if a capture is active (see sendToAI)
   function capturePng(hideBoxes) {
+    capturesInFlight++;
     var run = function () { return capturePngNow(hideBoxes); };
     var result = captureChain.then(run, run);
     captureChain = result.catch(function () {});
+    var settle = function () { capturesInFlight--; };
+    result.then(settle, settle);
     return result;
   }
   function capturePngNow(hideBoxes) {
