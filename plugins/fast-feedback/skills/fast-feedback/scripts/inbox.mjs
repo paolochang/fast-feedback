@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rmdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 function inboxDir() {
@@ -106,14 +106,53 @@ function buildMarkdown(items) {
   return markdown;
 }
 
-async function regenerateMirrors(dir, pendingDir) {
-  const items = await readPending(pendingDir);
-  const jsonl = items.map((item) => JSON.stringify(item)).join("\n") + (items.length ? "\n" : "");
-  await Promise.all([
-    writeAtomically(join(dir, "inbox.jsonl"), jsonl),
-    writeAtomically(join(dir, "inbox.md"), buildMarkdown(items)),
-  ]);
-  return items;
+export async function withMirrorLock(dir, run) {
+  const lockDir = join(dir, ".mirror.lock");
+  const deadline = Date.now() + 2000;
+  let acquired = false;
+  while (Date.now() < deadline) {
+    try {
+      await mkdir(lockDir);
+      acquired = true;
+      break;
+    } catch (error) {
+      if (error?.code !== "EEXIST" && error?.code !== "EPERM") throw error;
+      try {
+        if ((await stat(lockDir)).mtimeMs < Date.now() - 5000) {
+          await rmdir(lockDir);
+          continue;
+        }
+      } catch (statError) {
+        if (statError?.code !== "ENOENT") throw statError;
+        continue;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    }
+  }
+  try {
+    return await run();
+  } finally {
+    if (acquired) {
+      try {
+        await rmdir(lockDir);
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+    }
+  }
+}
+
+export async function regenerateMirrors(dir, pendingDir, { afterSnapshot } = {}) {
+  return withMirrorLock(dir, async () => {
+    const items = await readPending(pendingDir);
+    await afterSnapshot?.();
+    const jsonl = items.map((item) => JSON.stringify(item)).join("\n") + (items.length ? "\n" : "");
+    await Promise.all([
+      writeAtomically(join(dir, "inbox.jsonl"), jsonl),
+      writeAtomically(join(dir, "inbox.md"), buildMarkdown(items)),
+    ]);
+    return items;
+  });
 }
 
 export async function appendItems(items) {
@@ -146,6 +185,7 @@ export async function readAndClear({ remove = rm } = {}) {
     const claimedName = name + "." + randomUUID() + ".claimed";
     try {
       await rename(join(pendingDir, name), join(pendingDir, claimedName));
+      await utimes(join(pendingDir, claimedName), new Date(), new Date());
       return { claimedName };
     } catch (error) {
       if (error?.code === "ENOENT") return null;
