@@ -523,32 +523,65 @@
   function sendToAI() {
     if (typeof window.__FFB_SEND !== "function") { showToast("No server — use Copy All", false); return; }
     if (sendInFlight) { showToast("Sending…", false); return; }
-    var pending = anns.filter(function (a) { return !a.sent; });
-    if (!pending.length) { showToast("Nothing new to send", false); return; }
-    var sent = pending.map(function (a) {
+    if (!anns.length) { showToast("Nothing new to send", false); return; }
+    var snapshot = anns.map(function (a) {
       return {
         ann: a,
-        revision: a.revision,
-        item: { id: a.id, n: a.n, sel: a.sel, region: a.region, comment: a.comment, url: location.href, ts: new Date().toISOString() }
+        id: a.id,
+        revision: a.revision
       };
     });
-    var items = sent.map(function (entry) { return entry.item; });
+    var items = snapshot.map(function (entry) {
+      var a = entry.ann;
+      return { id: entry.id, n: a.n, sel: a.sel, region: a.region, comment: a.comment, url: location.href, ts: new Date().toISOString() };
+    });
+    var toSend = snapshot.filter(function (entry) { return !entry.ann.sentToInbox; });
     var request;
+    var sentToInbox = false;
     sendInFlight = true;
     try {
-      request = window.__FFB_SEND(items);
+      request = toSend.length ? window.__FFB_SEND(toSend.map(function (entry) {
+        var a = entry.ann;
+        return { id: entry.id, n: a.n, sel: a.sel, region: a.region, comment: a.comment, url: location.href, ts: new Date().toISOString() };
+      })) : null;
     } catch (e) {
       sendInFlight = false;
       showToast("Send failed — items kept", true);
       return;
     }
     Promise.resolve(request).then(function () {
-      sent.forEach(function (entry) {
-        if (entry.ann.revision === entry.revision) entry.ann.sent = true;
+      sentToInbox = true;
+      toSend.forEach(function (entry) { entry.ann.sentToInbox = true; });
+      if (typeof window.__FFB_ARCHIVE !== "function") return null;
+      return capturePng(true).then(function (capture) {
+        var meta = {
+          id: crypto.randomUUID(),
+          ts: new Date().toISOString(),
+          url: location.href,
+          capture: { w: capture.w, h: capture.h },
+          items: snapshot.map(function (entry, index) {
+            var item = items[index];
+            return {
+              id: entry.id,
+              n: item.n,
+              sel: item.sel,
+              region: captureRegion(entry.ann, capture),
+              comment: item.comment
+            };
+          })
+        };
+        var json = new TextEncoder().encode(JSON.stringify(meta));
+        var framing = new TextEncoder().encode(String(json.length) + "\n");
+        return window.__FFB_ARCHIVE(new Blob([framing, json, capture.blob], { type: "application/x-ffb-history" }));
       });
+    }).then(function () {
+      var flushed = snapshot.filter(function (entry) { return entry.ann.revision === entry.revision && anns.indexOf(entry.ann) !== -1; });
+      flushed.forEach(function (entry) { if (entry.ann.boxEl) entry.ann.boxEl.remove(); });
+      anns = anns.filter(function (a) { return !flushed.some(function (entry) { return entry.ann === a; }); });
+      renderList();
       showToast("Sent " + items.length + " items ✓", false);
     }).catch(function () {
-      showToast("Send failed — items kept", true);
+      showToast(sentToInbox ? "Archive failed — items kept" : "Send failed — items kept", true);
     }).then(function () {
       sendInFlight = false;
     });
@@ -567,35 +600,64 @@
   // copy tied to the button's user-gesture while the render finishes. If the
   // clipboard is blocked (permissions / not focused / unsupported, e.g. over
   // file://) we fall back to downloading the PNG so the shot is never lost.
-  function takeScreenshot() {
+  function capturePng(hideBoxes) {
     var h2c = window.html2canvas;
-    if (typeof h2c !== "function") {
-      alert("Screenshot needs the bundled html2canvas, which didn't load on this page.");
-      return;
-    }
-    var b = bar.querySelector("#__ffb_shotbtn"), prev = b.innerHTML;
-    b.textContent = "Capturing…";
+    if (typeof h2c !== "function") return Promise.reject(new Error("Screenshot needs the bundled html2canvas, which didn't load on this page."));
     var chrome = [bar, panel, form, confirmEl, layer];
+    if (hideBoxes) chrome.push(boxwrap);
     var vis = chrome.map(function (n) { return n.style.visibility; });
     chrome.forEach(function (n) { n.style.visibility = "hidden"; });
     var mt = document.body.style.marginTop;      // drop the top strip's spacer
+    var bodyTop = document.body.getBoundingClientRect().top;
     document.body.style.marginTop = prevBodyMt;   // so there's no empty band
+    var captureShiftY = bodyTop - document.body.getBoundingClientRect().top;
     var restored = false;
     var restore = function () {
       if (restored) return; restored = true;
       chrome.forEach(function (n, i) { n.style.visibility = vis[i]; });
       document.body.style.marginTop = mt;
     };
+    try {
+      return Promise.resolve(h2c(document.documentElement, { backgroundColor: null, useCORS: true, logging: false, scale: window.devicePixelRatio || 1 }))
+        .then(function (canvas) {
+          var capture = { w: canvas.width, h: canvas.height, docW: document.documentElement.scrollWidth || 1, docH: document.documentElement.scrollHeight || 1, shiftY: captureShiftY };
+          restore();
+          return new Promise(function (res, rej) {
+            canvas.toBlob(function (blob) { blob ? res({ blob: blob, capture: capture }) : rej(new Error("toBlob returned null")); }, "image/png");
+          });
+        }).then(function (result) {
+          result.capture.blob = result.blob;
+          return result.capture;
+        }).catch(function (err) { restore(); throw err; });
+    } catch (err) {
+      restore();
+      return Promise.reject(err);
+    }
+  }
+
+  function captureRegion(ann, capture) {
+    var rect = ann.boxEl.getBoundingClientRect();
+    var scaleX = capture.w / capture.docW, scaleY = capture.h / capture.docH;
+    var pct = function (v, total) { return Math.max(0, Math.min(100, Math.round((v / total) * 10000) / 100)); };
+    return {
+      x: pct((rect.left + window.pageXOffset) * scaleX, capture.w),
+      y: pct((rect.top + window.pageYOffset - capture.shiftY) * scaleY, capture.h),
+      w: pct(rect.width * scaleX, capture.w),
+      h: pct(rect.height * scaleY, capture.h)
+    };
+  }
+
+  function takeScreenshot() {
+    if (typeof window.html2canvas !== "function") {
+      alert("Screenshot needs the bundled html2canvas, which didn't load on this page.");
+      return;
+    }
+    var b = bar.querySelector("#__ffb_shotbtn"), prev = b.innerHTML;
+    b.textContent = "Capturing…";
     var done = function (label) { b.textContent = label; setTimeout(function () { b.innerHTML = prev; }, 1400); };
 
     // Render → PNG blob. Restore our chrome the moment the canvas is ready.
-    var blobPromise = h2c(document.documentElement, { backgroundColor: null, useCORS: true, logging: false, scale: window.devicePixelRatio || 1 })
-      .then(function (canvas) {
-        restore();
-        return new Promise(function (res, rej) {
-          canvas.toBlob(function (blob) { blob ? res(blob) : rej(new Error("toBlob returned null")); }, "image/png");
-        });
-      });
+    var blobPromise = capturePng(false).then(function (capture) { return capture.blob; });
 
     // Put a copy on disk. Live/proxy mode POSTs the PNG and the server writes it
     // to the configured folder; file/console mode has no server, so it falls back
@@ -618,7 +680,7 @@
     // Clipboard blocked / unsupported → still save the shot so it's never lost.
     function saveOnly() {
       blobPromise.then(persistShot).then(function (res) { done(res && res.how === "folder" ? "Saved to folder ✓" : "Saved ✓"); })
-        .catch(function (err) { restore(); b.innerHTML = prev; alert("Screenshot failed: " + (err && err.message ? err.message : err)); });
+        .catch(function (err) { b.innerHTML = prev; alert("Screenshot failed: " + (err && err.message ? err.message : err)); });
     }
 
     if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {

@@ -123,9 +123,13 @@ const saveShotFn = "window.__FFB_SAVE_SHOT=function(blob){return fetch('/__ffb__
 // window.__FFB_SEND posts only live feedback items. Unlike save settings, a
 // failed response rejects so the overlay can truthfully keep those items dirty.
 const sendFn = "window.__FFB_SEND=function(items){return fetch('/__ffb__/send',{method:'POST',headers:{'content-type':'application/json','x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "},body:JSON.stringify(items)}).then(function(r){if(!r.ok)throw new Error('Send failed: '+r.status);return r;});};";
+// window.__FFB_ARCHIVE posts a length-prefixed history batch. It uses the same
+// per-proxy token as __FFB_SEND and rejects non-2xx responses so the overlay
+// can keep the flushed boxes visible for a retry.
+const archiveFn = "window.__FFB_ARCHIVE=function(body){return fetch('/__ffb__/history',{method:'POST',headers:{'content-type':'application/x-ffb-history','x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "},body:body}).then(function(r){if(!r.ok)throw new Error('Archive failed: '+r.status);return r;});};";
 // Rebuilt per HTML response so a fresh reload reflects the latest saved settings.
 function bootScript() {
-  return "\n<script>window.__FFB_FILE=" + JSON.stringify(targetUrl.host) + ";" + bootAssignments() + saveFn + saveShotFn + sendFn + "</script>\n" +
+  return "\n<script>window.__FFB_FILE=" + JSON.stringify(targetUrl.host) + ";" + bootAssignments() + saveFn + saveShotFn + sendFn + archiveFn + "</script>\n" +
     "<script>\n" + buildEngine() + "\n</script>\n";
 }
 
