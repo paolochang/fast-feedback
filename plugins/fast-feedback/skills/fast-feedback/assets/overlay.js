@@ -567,7 +567,7 @@
         setTimeout(function () { ta.focus(); }, 0);
         var save = function () {
           var comment = ta.value.trim();
-          if (comment !== a.comment) { a.comment = comment; a.sent = false; a.revision++; }
+          if (comment !== a.comment) { a.comment = comment; a.sentToInbox = false; a.revision++; }
           editingN = null; renderList();
         };
         var closeEdit = function () {

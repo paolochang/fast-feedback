@@ -129,9 +129,9 @@ const sendFn = "window.__FFB_SEND=function(items){return fetch('/__ffb__/send',{
 const archiveFn = "window.__FFB_ARCHIVE=function(body){return fetch('/__ffb__/history',{method:'POST',headers:{'content-type':'application/x-ffb-history','x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "},body:body}).then(function(r){if(!r.ok)throw new Error('Archive failed: '+r.status);return r;});};";
 // History reads need the same per-proxy token as sends. The overlay cannot
 // access the closure that owns it, so expose only these token-bound helpers.
-const historyReadFns = "window.__FFB_HISTORY_LIST=function(){return fetch('/__ffb__/history',{headers:{'x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "}}).then(function(r){return r.json();});};" +
-  "window.__FFB_HISTORY_META=function(id){return fetch('/__ffb__/history/'+id+'.json',{headers:{'x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "}}).then(function(r){return r.json();});};" +
-  "window.__FFB_HISTORY_BLOB=function(id){return fetch('/__ffb__/history/'+id+'.png',{headers:{'x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "}}).then(function(r){return r.blob();});};";
+const historyReadFns = "window.__FFB_HISTORY_LIST=function(){return fetch('/__ffb__/history',{headers:{'x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "}}).then(function(r){if(!r.ok)throw new Error('History request failed: '+r.status);return r.json();});};" +
+  "window.__FFB_HISTORY_META=function(id){return fetch('/__ffb__/history/'+id+'.json',{headers:{'x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "}}).then(function(r){if(!r.ok)throw new Error('History request failed: '+r.status);return r.json();});};" +
+  "window.__FFB_HISTORY_BLOB=function(id){return fetch('/__ffb__/history/'+id+'.png',{headers:{'x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "}}).then(function(r){if(!r.ok)throw new Error('History request failed: '+r.status);return r.blob();});};";
 // Rebuilt per HTML response so a fresh reload reflects the latest saved settings.
 function bootScript() {
   return "\n<script>window.__FFB_FILE=" + JSON.stringify(targetUrl.host) + ";" + bootAssignments() + saveFn + saveShotFn + sendFn + archiveFn + historyReadFns + "</script>\n" +
