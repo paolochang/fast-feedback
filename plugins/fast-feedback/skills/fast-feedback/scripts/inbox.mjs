@@ -106,17 +106,14 @@ function buildMarkdown(items) {
   return markdown;
 }
 
-export async function withMirrorLock(dir, run, onSkip) {
-  const lockDir = join(dir, ".mirror.lock");
-  const deadline = Date.now() + 2000;
-  let acquired = false;
-  while (Date.now() < deadline) {
+export async function withLock(dir, run) {
+  const lockDir = join(dir, ".lock");
+  for (;;) {
     try {
       await mkdir(lockDir);
-      acquired = true;
       break;
     } catch (error) {
-      if (error?.code !== "EEXIST" && error?.code !== "EPERM") throw error;
+      if (error?.code !== "EEXIST") throw error;
       try {
         if ((await stat(lockDir)).mtimeMs < Date.now() - 5000) {
           await rmdir(lockDir);
@@ -129,19 +126,13 @@ export async function withMirrorLock(dir, run, onSkip) {
       await new Promise((resolve) => setTimeout(resolve, 15));
     }
   }
-  if (!acquired) {
-    await onSkip?.();
-    return;
-  }
   try {
     return await run();
   } finally {
-    if (acquired) {
-      try {
-        await rmdir(lockDir);
-      } catch (error) {
-        if (error?.code !== "ENOENT") throw error;
-      }
+    try {
+      await rmdir(lockDir);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
     }
   }
 }
@@ -156,102 +147,82 @@ async function writeMirrors(dir, pendingDir) {
   return items;
 }
 
-async function touch(path) {
-  try {
-    await writeFile(path, "", { flag: "wx" });
-  } catch (error) {
-    if (error?.code !== "EEXIST") throw error;
-  }
-}
-
-export async function regenerateMirrors(dir, pendingDir, { afterAcquire } = {}) {
-  const dirtyPath = join(dir, ".mirror.dirty");
-  return withMirrorLock(dir, async () => {
-    await afterAcquire?.();
-    const items = await writeMirrors(dir, pendingDir);
-    try {
-      await stat(dirtyPath);
-    } catch (error) {
-      if (error?.code === "ENOENT") return items;
-      throw error;
-    }
-    await rm(dirtyPath, { force: true });
-    return writeMirrors(dir, pendingDir);
-  }, () => touch(dirtyPath));
-}
-
 export async function appendItems(items) {
   if (!Array.isArray(items)) throw new TypeError("items must be an array");
 
   const { dir, pendingDir } = await ensureInbox();
   const normalizedItems = items.map(normalizeItem);
-  await Promise.all(normalizedItems.map((item) => writeAtomically(
-    join(pendingDir, filenameForItem(item)),
-    JSON.stringify(item),
-  )));
-  try {
-    await regenerateMirrors(dir, pendingDir);
-  } catch (error) {
-    console.error(error);
-  }
+  await withLock(dir, async () => {
+    await Promise.all(normalizedItems.map((item) => writeAtomically(
+      join(pendingDir, filenameForItem(item)),
+      JSON.stringify(item),
+    )));
+    try {
+      await writeMirrors(dir, pendingDir);
+    } catch (error) {
+      console.error(error);
+    }
+  });
 }
 
 export async function peek() {
-  const { pendingDir } = await ensureInbox();
-  return readPending(pendingDir);
+  const { dir, pendingDir } = await ensureInbox();
+  return withLock(dir, () => readPending(pendingDir));
 }
 
 export async function count() {
-  const { pendingDir } = await ensureInbox();
-  return (await pendingFiles(pendingDir)).length;
+  const { dir, pendingDir } = await ensureInbox();
+  return withLock(dir, async () => (await pendingFiles(pendingDir)).length);
 }
 
 export async function readAndClear({ remove = rm } = {}) {
   const { dir, pendingDir } = await ensureInbox();
-  await recoverAbandonedClaims(pendingDir);
-  const files = await pendingFiles(pendingDir);
-  const claims = await Promise.all(files.map(async ({ name }) => {
-    const claimedName = name + "." + randomUUID() + ".claimed";
-    try {
-      await utimes(join(pendingDir, name), new Date(), new Date());
-      await rename(join(pendingDir, name), join(pendingDir, claimedName));
-      return { claimedName };
-    } catch (error) {
-      if (error?.code === "ENOENT") return null;
-      throw error;
-    }
-  }));
-  const entries = await Promise.all(claims.filter(Boolean).map(async ({ claimedName }) => {
-    try {
-      return {
-        claimedName,
-        item: JSON.parse(await readFile(join(pendingDir, claimedName), "utf8")),
-      };
-    } catch (error) {
+  return withLock(dir, async () => {
+    await recoverAbandonedClaims(pendingDir);
+    const files = await pendingFiles(pendingDir);
+    const claims = await Promise.all(files.map(async ({ name }) => {
+      const claimedName = name + "." + randomUUID() + ".claimed";
       try {
-        await rename(join(pendingDir, claimedName), join(pendingDir, claimedName + ".corrupt"));
-      } catch (renameError) {
-        if (renameError?.code !== "ENOENT") throw renameError;
+        await utimes(join(pendingDir, name), new Date(), new Date());
+        await rename(join(pendingDir, name), join(pendingDir, claimedName));
+        return { claimedName };
+      } catch (error) {
+        if (error?.code === "ENOENT") return null;
+        throw error;
       }
-      console.error(error);
-      return null;
-    }
-  }));
-  const readableEntries = entries.filter(Boolean);
-  const removed = await Promise.all(readableEntries.map(async (entry) => {
+    }));
+    const entries = await Promise.all(claims.filter(Boolean).map(async ({ claimedName }) => {
+      try {
+        return {
+          claimedName,
+          item: JSON.parse(await readFile(join(pendingDir, claimedName), "utf8")),
+        };
+      } catch (error) {
+        try {
+          await rename(join(pendingDir, claimedName), join(pendingDir, claimedName + ".corrupt"));
+        } catch (renameError) {
+          if (renameError?.code !== "ENOENT") throw renameError;
+        }
+        console.error(error);
+        return null;
+      }
+    }));
+    const readableEntries = entries.filter(Boolean);
+    const removed = await Promise.all(readableEntries.map(async (entry) => {
+      try {
+        await remove(join(pendingDir, entry.claimedName));
+        return entry;
+      } catch (error) {
+        console.error(error);
+        return null;
+      }
+    }));
+    const deliveredEntries = removed.filter(Boolean);
     try {
-      await remove(join(pendingDir, entry.claimedName));
-      return entry;
+      await writeMirrors(dir, pendingDir);
     } catch (error) {
       console.error(error);
-      return null;
     }
-  }));
-  const deliveredEntries = removed.filter(Boolean);
-  try {
-    await regenerateMirrors(dir, pendingDir);
-  } catch (error) {
-    console.error(error);
-  }
-  return deliveredEntries.map(({ item }) => item);
+    return deliveredEntries.map(({ item }) => item);
+  });
 }

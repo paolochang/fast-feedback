@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, readdir, rmdir, rm, utimes, writeFile } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { appendItems, count, peek, readAndClear, regenerateMirrors, withMirrorLock } from "./inbox.mjs";
+import { appendItems, count, peek, readAndClear } from "./inbox.mjs";
 
 async function withInbox(run) {
   const dir = await mkdtemp(join(tmpdir(), "ffb-inbox-"));
@@ -16,6 +16,12 @@ async function withInbox(run) {
     else process.env.FFB_INBOX = previous;
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+async function assertMirrorMatchesSpool(dir) {
+  const jsonl = await readFile(join(dir, "inbox.jsonl"), "utf8");
+  const mirror = jsonl.trim() ? jsonl.trim().split("\n").map((line) => JSON.parse(line)) : [];
+  assert.deepEqual(mirror, await peek());
 }
 
 test("appendItems atomically spools every item and regenerates both mirrors", async () => {
@@ -155,175 +161,66 @@ test("concurrent consumers exclusively claim every pending item", async () => {
   });
 });
 
-test("concurrent consumers do not recover an aged item after it is claimed", async () => {
+test("concurrent consumers deliver an aged pending item exactly once", async () => {
   await withInbox(async (dir) => {
     const item = { comment: "aged before claim" };
-    let releaseRemove;
-    let claimed;
-    const removeClaimed = new Promise((resolve) => {
-      claimed = resolve;
-    });
-    const waitForRemove = new Promise((resolve) => {
-      releaseRemove = resolve;
-    });
-    const previousTtl = process.env.FFB_CLAIM_TTL_MS;
-    process.env.FFB_CLAIM_TTL_MS = "1000";
-    try {
-      await appendItems([item]);
-      const [name] = await readdir(join(dir, "pending"));
-      const pendingPath = join(dir, "pending", name);
-      await utimes(pendingPath, new Date(Date.now() - 120000), new Date(Date.now() - 120000));
+    await appendItems([item]);
+    const [name] = await readdir(join(dir, "pending"));
+    const pendingPath = join(dir, "pending", name);
+    await utimes(pendingPath, new Date(Date.now() - 120000), new Date(Date.now() - 120000));
 
-      const first = readAndClear({ remove: async (path) => {
-        claimed();
-        await waitForRemove;
-        await rm(path);
-      } });
-      await removeClaimed;
-      const second = await readAndClear();
-      releaseRemove();
-      const returned = (await first).concat(second);
+    const returned = (await Promise.all([readAndClear(), readAndClear()])).flat();
 
-      assert.deepEqual(returned.map(({ comment }) => comment), [item.comment]);
-    } finally {
-      if (previousTtl === undefined) delete process.env.FFB_CLAIM_TTL_MS;
-      else process.env.FFB_CLAIM_TTL_MS = previousTtl;
-    }
+    assert.deepEqual(returned.map(({ comment }) => comment), [item.comment]);
   });
 });
 
-test("a consumer does not return an item when recovery reassigns and deletes its expired claim", async () => {
-  await withInbox(async (dir) => {
+test("readAndClear does not return an item when its claimed file disappears before deletion", async () => {
+  await withInbox(async () => {
     const item = { comment: "recover and delete me" };
-    let firstDeleteReady;
-    let releaseFirstDelete;
-    const firstDeleteStarted = new Promise((resolve) => {
-      firstDeleteReady = resolve;
-    });
-    const releaseDelete = new Promise((resolve) => {
-      releaseFirstDelete = resolve;
-    });
-    const previousTtl = process.env.FFB_CLAIM_TTL_MS;
-    process.env.FFB_CLAIM_TTL_MS = "1";
-    try {
-      await appendItems([item]);
-
-      const first = readAndClear({ remove: async (path) => {
-        firstDeleteReady();
-        await releaseDelete;
-        await rm(path);
-      } });
-      await firstDeleteStarted;
-      const claimedName = (await readdir(join(dir, "pending"))).find((name) => name.endsWith(".claimed"));
-      await utimes(join(dir, "pending", claimedName), new Date(Date.now() - 1000), new Date(Date.now() - 1000));
-
-      const second = await readAndClear();
-      releaseFirstDelete();
-      const firstItems = await first;
-
-      assert.deepEqual(firstItems, []);
-      assert.deepEqual(second.map(({ comment }) => comment), [item.comment]);
-    } finally {
-      if (previousTtl === undefined) delete process.env.FFB_CLAIM_TTL_MS;
-      else process.env.FFB_CLAIM_TTL_MS = previousTtl;
-    }
-  });
-});
-
-test("withMirrorLock excludes overlapping critical sections", async () => {
-  await withInbox(async (dir) => {
-    let inFlight = false;
-    let overlapped = false;
-    let releaseFirst;
-    let enteredFirst;
-    const firstEntered = new Promise((resolve) => {
-      enteredFirst = resolve;
-    });
-    const release = new Promise((resolve) => {
-      releaseFirst = resolve;
-    });
-
-    const first = withMirrorLock(dir, async () => {
-      inFlight = true;
-      enteredFirst();
-      await release;
-      inFlight = false;
-    });
-    await firstEntered;
-    const second = withMirrorLock(dir, async () => {
-      overlapped = inFlight;
-    });
-    releaseFirst();
-    await Promise.all([first, second]);
-
-    assert.equal(overlapped, false);
-  });
-});
-
-test("serialized mirror regeneration publishes the current spool after an interleaved clear", async () => {
-  await withInbox(async (dir) => {
-    const item = { comment: "clear me" };
-    let releaseAcquire;
-    let acquired;
-    const waitForClear = new Promise((resolve) => {
-      releaseAcquire = resolve;
-    });
-    const holderAcquired = new Promise((resolve) => {
-      acquired = resolve;
-    });
     await appendItems([item]);
 
-    const stale = regenerateMirrors(dir, join(dir, "pending"), { afterAcquire: () => {
-      acquired();
-      return waitForClear;
+    const returned = await readAndClear({ remove: async (path) => {
+      await rm(path);
+      const error = new Error("already removed");
+      error.code = "ENOENT";
+      throw error;
     } });
-    await holderAcquired;
-    await readAndClear();
-    releaseAcquire();
-    await stale;
 
-    const jsonl = await readFile(join(dir, "inbox.jsonl"), "utf8");
-    assert.deepEqual(jsonl.trim() ? jsonl.trim().split("\n").map((line) => JSON.parse(line)) : [], await peek());
+    assert.deepEqual(returned, []);
+    assert.deepEqual(await readAndClear(), []);
   });
 });
 
-test("regenerateMirrors skips and marks dirty when the mirror lock cannot be acquired", async () => {
+test("spool operations wait for the operation lock instead of skipping", async () => {
   await withInbox(async (dir) => {
-    await appendItems([]);
-    await rm(join(dir, "inbox.jsonl"));
-    const lockDir = join(dir, ".mirror.lock");
+    const lockDir = join(dir, ".lock");
     await mkdir(lockDir);
-    try {
-      await writeFile(
-        join(dir, "pending", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.json"),
-        JSON.stringify({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", comment: "blocked" }),
-        "utf8",
-      );
-      await Promise.race([
-        regenerateMirrors(dir, join(dir, "pending")),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("mirror regeneration timed out")), 3000)),
-      ]);
-      await assert.rejects(readFile(join(dir, "inbox.jsonl"), "utf8"), { code: "ENOENT" });
-      assert.equal(await readFile(join(dir, ".mirror.dirty"), "utf8"), "");
-    } finally {
-      await rmdir(lockDir);
-    }
+    const append = appendItems([{ comment: "wait for lock" }]);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await assert.rejects(readFile(join(dir, "inbox.jsonl"), "utf8"), { code: "ENOENT" });
+
+    await rmdir(lockDir);
+    await append;
+    assert.deepEqual((await peek()).map(({ comment }) => comment), ["wait for lock"]);
   });
 });
 
-test("regenerateMirrors clears dirty and refreshes the current spool", async () => {
+test("concurrent spool mutations leave the mirror equal to the final spool", async () => {
   await withInbox(async (dir) => {
-    const item = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", comment: "refresh me" };
-    await appendItems([]);
-    await writeFile(join(dir, "pending", item.id + ".json"), JSON.stringify(item), "utf8");
-    await writeFile(join(dir, "inbox.jsonl"), JSON.stringify({ comment: "stale" }) + "\n", "utf8");
-    await writeFile(join(dir, ".mirror.dirty"), "", "utf8");
+    for (let iteration = 0; iteration < 20; iteration += 1) {
+      const initial = { comment: "initial " + iteration };
+      const appended = { comment: "appended " + iteration };
+      await appendItems([initial]);
+      await assertMirrorMatchesSpool(dir);
 
-    await regenerateMirrors(dir, join(dir, "pending"));
+      await Promise.all([appendItems([appended]), readAndClear()]);
 
-    const jsonl = await readFile(join(dir, "inbox.jsonl"), "utf8");
-    assert.deepEqual(jsonl.trim().split("\n").map((line) => JSON.parse(line)), await peek());
-    await assert.rejects(readFile(join(dir, ".mirror.dirty"), "utf8"), { code: "ENOENT" });
+      await assertMirrorMatchesSpool(dir);
+      await readAndClear();
+      await assertMirrorMatchesSpool(dir);
+    }
   });
 });
 
