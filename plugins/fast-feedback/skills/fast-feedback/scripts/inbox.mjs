@@ -164,7 +164,11 @@ export async function appendItems(items) {
     join(pendingDir, filenameForItem(item)),
     JSON.stringify(item),
   )));
-  await regenerateMirrors(dir, pendingDir);
+  try {
+    await regenerateMirrors(dir, pendingDir);
+  } catch (error) {
+    console.error(error);
+  }
 }
 
 export async function peek() {
@@ -184,8 +188,8 @@ export async function readAndClear({ remove = rm } = {}) {
   const claims = await Promise.all(files.map(async ({ name }) => {
     const claimedName = name + "." + randomUUID() + ".claimed";
     try {
+      await utimes(join(pendingDir, name), new Date(), new Date());
       await rename(join(pendingDir, name), join(pendingDir, claimedName));
-      await utimes(join(pendingDir, claimedName), new Date(), new Date());
       return { claimedName };
     } catch (error) {
       if (error?.code === "ENOENT") return null;

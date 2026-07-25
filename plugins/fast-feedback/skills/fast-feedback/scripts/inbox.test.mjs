@@ -53,6 +53,17 @@ test("appendItems atomically spools every item and regenerates both mirrors", as
   });
 });
 
+test("appendItems retains pending items when mirror regeneration fails", async () => {
+  await withInbox(async (dir) => {
+    const item = { selector: "main", comment: "Keep this" };
+    await mkdir(join(dir, "inbox.jsonl"));
+
+    await appendItems([item]);
+
+    assert.deepEqual((await peek()).map(({ id, ...entry }) => entry), [item]);
+  });
+});
+
 test("peek and count retain pending items until readAndClear consumes them", async () => {
   await withInbox(async (dir) => {
     const items = [{ selector: "main", comment: "Looks good" }];
