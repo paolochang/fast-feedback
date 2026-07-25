@@ -99,6 +99,11 @@
     '.__ffb_histbody{min-width:0;flex:1}',
     '.__ffb_histmeta{color:var(--__ffb_mut);font-size:11px}',
     '.__ffb_histpreview{color:var(--__ffb_ink);font-size:12.5px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+    '.__ffb_hist{cursor:pointer}',
+    '.__ffb_histdetail{display:flex;flex-direction:column;gap:8px}',
+    '.__ffb_histshot{position:relative;width:100%;line-height:0}',
+    '.__ffb_histshot img{display:block;width:100%;height:auto}',
+    '.__ffb_histshot .__ffb_box{pointer-events:none}',
     // confirm
     '.__ffb_confirm{position:fixed;z-index:2147483647;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center}',
     '.__ffb_confirm.open{display:flex}',
@@ -267,7 +272,7 @@
   root.appendChild(panel);
   var itemsEl = panel.querySelector("#__ffb_items");
   var activeListTab = "live", historyRows = null, historyLoading = false, historyError = false;
-  var historyVisibleCount = 10, historyObjectUrls = [], historyObserver = null;
+  var historyVisibleCount = 10, historyObjectUrls = [], historyObserver = null, historyDetailId = null;
 
   // ---- confirm dialog ---------------------------------------------------
   var confirmEl = document.createElement("div");
@@ -545,6 +550,7 @@
         '<div class="__ffb_histbody"><div class="__ffb_histmeta">' + esc(historyTime(row.ts)) + ' · ' + count + ' item' + (count === 1 ? "" : "s") + '</div>' +
         '<div class="__ffb_histpreview">' + esc(String(row.preview || "(no preview)")) + '</div></div>';
       var thumb = item.querySelector(".__ffb_histthumb");
+      item.onclick = function () { openHistoryDetail(row.id); };
       itemsEl.appendChild(item);
       observeHistoryThumb(thumb, row.id);
     });
@@ -557,9 +563,72 @@
     }
   }
 
+  function openHistoryDetail(id) {
+    historyDetailId = id;
+    renderList();
+  }
+
+  function renderHistoryDetail(id) {
+    clearHistoryThumbs();
+    itemsEl.innerHTML = '<div class="__ffb_empty">Loading archived feedback…</div>';
+    if (typeof window.__FFB_HISTORY_META !== "function" || typeof window.__FFB_HISTORY_BLOB !== "function") {
+      itemsEl.innerHTML = '<div class="__ffb_empty">Could not load this archived feedback.</div>';
+      return;
+    }
+    Promise.all([
+      Promise.resolve().then(function () { return window.__FFB_HISTORY_META(id); }),
+      Promise.resolve().then(function () { return window.__FFB_HISTORY_BLOB(id); })
+    ]).then(function (result) {
+      var meta = result[0], blob = result[1], url = URL.createObjectURL(blob);
+      if (historyDetailId !== id || activeListTab !== "history" || !panel.classList.contains("open")) { URL.revokeObjectURL(url); return; }
+      historyObjectUrls.push(url);
+      itemsEl.innerHTML = "";
+      var detail = document.createElement("div");
+      detail.className = "__ffb_histdetail";
+      var back = document.createElement("button");
+      back.className = "__ffb_btn";
+      back.textContent = "← Back to History";
+      back.onclick = function () { historyDetailId = null; renderList(); };
+      var shot = document.createElement("div");
+      shot.className = "__ffb_histshot";
+      var image = document.createElement("img");
+      image.src = url;
+      image.alt = "Archived feedback screenshot";
+      shot.appendChild(image);
+      var comments = document.createElement("div");
+      (Array.isArray(meta && meta.items) ? meta.items : []).forEach(function (entry) {
+        var region = entry.region || {}, box = document.createElement("div");
+        box.className = "__ffb_box";
+        box.style.left = Number(region.x) + "%";
+        box.style.top = Number(region.y) + "%";
+        box.style.width = Number(region.w) + "%";
+        box.style.height = Number(region.h) + "%";
+        var badge = document.createElement("div");
+        badge.className = "__ffb_num";
+        badge.textContent = entry.n;
+        box.appendChild(badge);
+        shot.appendChild(box);
+        var comment = document.createElement("div");
+        comment.className = "__ffb_item";
+        comment.innerHTML = '<div><span class="__ffb_n">[' + esc(String(entry.n)) + ']</span><span class="__ffb_isel">' + esc(String(entry.sel || "")) + '</span></div>' +
+          '<div class="__ffb_cmt">' + (entry.comment ? esc(String(entry.comment)) : '<span style="color:var(--__ffb_mut)">(no comment)</span>') + '</div>';
+        comments.appendChild(comment);
+      });
+      detail.appendChild(back);
+      detail.appendChild(shot);
+      detail.appendChild(comments);
+      itemsEl.appendChild(detail);
+    }).catch(function () {
+      if (historyDetailId === id && activeListTab === "history" && panel.classList.contains("open")) {
+        itemsEl.innerHTML = '<div class="__ffb_empty">Could not load this archived feedback.</div>';
+      }
+    });
+  }
+
   function renderHistory() {
     clearHistoryThumbs();
     itemsEl.innerHTML = "";
+    if (historyDetailId !== null) { renderHistoryDetail(historyDetailId); return; }
     if (typeof window.__FFB_HISTORY_LIST !== "function") {
       itemsEl.innerHTML = '<div class="__ffb_empty">History is available when Fast Feedback is served through the proxy.</div>';
       return;
@@ -583,12 +652,13 @@
   function setListTab(tab) {
     activeListTab = tab;
     panel.querySelectorAll(".__ffb_tab").forEach(function (button) { button.classList.toggle("sel", button.getAttribute("data-tab") === tab); });
+    historyDetailId = null;
     if (tab === "history") historyRows = null;
     renderList();
   }
 
   panel.querySelectorAll(".__ffb_tab").forEach(function (button) { button.onclick = function () { setListTab(button.getAttribute("data-tab")); }; });
-  function closeList() { clearHistoryThumbs(); panel.classList.remove("open"); }
+  function closeList() { historyDetailId = null; clearHistoryThumbs(); panel.classList.remove("open"); }
   panel.querySelector(".__ffb_x").onclick = closeList;
   panel.querySelector("#__ffb_psend").onclick = sendToAI;
   panel.querySelector("#__ffb_pcopy").onclick = copyAll;
