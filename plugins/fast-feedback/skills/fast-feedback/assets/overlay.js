@@ -158,6 +158,9 @@
     // custom tooltip (short text + keycap chips)
     '.__ffb_tip{position:fixed;z-index:2147483647;display:none;align-items:center;gap:8px;background:var(--__ffb_surf);border:1px solid var(--__ffb_line);border-radius:8px;padding:6px 8px 6px 10px;box-shadow:0 8px 24px var(--__ffb_shadow);color:var(--__ffb_ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:12px;white-space:nowrap;pointer-events:none}',
     '.__ffb_tip.open{display:flex}',
+    '.__ffb_toast{position:fixed;z-index:2147483647;right:14px;bottom:14px;display:none;max-width:320px;padding:9px 12px;background:var(--__ffb_surf);border:1px solid var(--__ffb_line);border-radius:8px;box-shadow:0 8px 24px var(--__ffb_shadow);color:var(--__ffb_ink);font:600 12.5px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}',
+    '.__ffb_toast.open{display:block}',
+    '.__ffb_toast.error{color:var(--__ffb_warn);border-color:var(--__ffb_warn)}',
     '.__ffb_tiptext{color:var(--__ffb_ink);font-weight:500}',
     '.__ffb_keys{display:inline-flex;align-items:center;gap:4px}',
     '.__ffb_kbd{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-width:20px;height:20px;padding:0 7px;background:var(--__ffb_chip);color:var(--__ffb_chipink);border:1px solid rgba(127,127,127,.22);border-radius:6px;font-size:11px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}',
@@ -176,7 +179,7 @@
   document.body.style.marginTop = BAR_H + "px";
 
   var FILE = window.__FFB_FILE || document.title || (location.pathname + location.search) || "frontend";
-  var anns = [];            // committed: {n, sel, region, comment, boxEl}
+  var anns = [];            // committed: {id, n, sel, region, comment, sent, revision, boxEl}
   var counter = 0;
   var active = false, drawing = false, startPage = null, tempEl = null;
   var draft = null;         // in-progress NEW annotation: {sel, region, boxEl}
@@ -210,6 +213,16 @@
     '<button id="__ffb_setbtn">⚙</button>';
   root.appendChild(bar);
   bar.querySelector("#__ffb_file").textContent = FILE;
+  var toast = document.createElement("div");
+  toast.className = "__ffb_toast";
+  root.appendChild(toast);
+  var toastTimer = null;
+  function showToast(message, error) {
+    clearTimeout(toastTimer);
+    toast.textContent = message;
+    toast.className = "__ffb_toast open" + (error ? " error" : "");
+    toastTimer = setTimeout(function () { toast.className = "__ffb_toast"; }, 2600);
+  }
 
   var layer = document.createElement("div");
   layer.className = "__ffb_layer";
@@ -239,7 +252,9 @@
     '<button class="__ffb_btn" id="__ffb_pcopy" style="padding:3px 9px">Copy</button>' +
     '<button class="__ffb_btn" id="__ffb_pclear" style="padding:3px 9px">Clear</button>' +
     '<button class="__ffb_x" title="Close">✕</button></div>' +
-    '<div class="__ffb_list" id="__ffb_items"></div>';
+    '<div class="__ffb_list" id="__ffb_items"></div>' +
+    '<div id="__ffb_foot" style="padding:10px 12px;border-top:1px solid var(--__ffb_line);display:flex">' +
+    '<button class="__ffb_btn primary" id="__ffb_psend" title="Send new feedback to AI" style="flex:1;padding:8px 12px">Send to AI</button></div>';
   root.appendChild(panel);
   var itemsEl = panel.querySelector("#__ffb_items");
 
@@ -367,7 +382,7 @@
   function submitForm() {
     if (!draft) { form.classList.remove("open"); return; }
     var n = ++counter;
-    var ann = { n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), boxEl: draft.boxEl };
+    var ann = { id: crypto.randomUUID(), n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), sent: false, revision: 0, boxEl: draft.boxEl };
     decorateBox(ann);
     anns.push(ann);
     draft = null;
@@ -432,7 +447,11 @@
           '<div class="__ffb_iact"><button class="__ffb_btn __ffb_ec">Close</button><button class="__ffb_btn primary __ffb_es">Save</button></div>';
         var ta = item.querySelector("textarea");
         setTimeout(function () { ta.focus(); }, 0);
-        var save = function () { a.comment = ta.value.trim(); editingN = null; renderList(); };
+        var save = function () {
+          var comment = ta.value.trim();
+          if (comment !== a.comment) { a.comment = comment; a.sent = false; a.revision++; }
+          editingN = null; renderList();
+        };
         var closeEdit = function () {
           if (ta.value.trim() !== a.comment) confirmDiscard("Discard your changes?", function () { editingN = null; renderList(); });
           else { editingN = null; renderList(); }
@@ -456,6 +475,7 @@
     });
   }
   panel.querySelector(".__ffb_x").onclick = function () { panel.classList.remove("open"); };
+  panel.querySelector("#__ffb_psend").onclick = sendToAI;
   panel.querySelector("#__ffb_pcopy").onclick = copyAll;
   panel.querySelector("#__ffb_pclear").onclick = clearAll;
 
@@ -494,6 +514,44 @@
     var t = document.createElement("textarea"); t.value = text;
     t.style.position = "fixed"; t.style.opacity = "0"; document.body.appendChild(t);
     t.select(); try { document.execCommand("copy"); } catch (e) {} t.remove();
+  }
+
+  // ---- send to AI --------------------------------------------------------
+  // Live/proxy mode injects __FFB_SEND. File and console modes keep Copy All as
+  // their universal fallback, so never assume that function exists here.
+  var sendInFlight = false;
+  function sendToAI() {
+    if (typeof window.__FFB_SEND !== "function") { showToast("No server — use Copy All", false); return; }
+    if (sendInFlight) { showToast("Sending…", false); return; }
+    var pending = anns.filter(function (a) { return !a.sent; });
+    if (!pending.length) { showToast("Nothing new to send", false); return; }
+    var sent = pending.map(function (a) {
+      return {
+        ann: a,
+        revision: a.revision,
+        item: { id: a.id, n: a.n, sel: a.sel, region: a.region, comment: a.comment, url: location.href, ts: new Date().toISOString() }
+      };
+    });
+    var items = sent.map(function (entry) { return entry.item; });
+    var request;
+    sendInFlight = true;
+    try {
+      request = window.__FFB_SEND(items);
+    } catch (e) {
+      sendInFlight = false;
+      showToast("Send failed — items kept", true);
+      return;
+    }
+    Promise.resolve(request).then(function () {
+      sent.forEach(function (entry) {
+        if (entry.ann.revision === entry.revision) entry.ann.sent = true;
+      });
+      showToast("Sent " + items.length + " items ✓", false);
+    }).catch(function () {
+      showToast("Send failed — items kept", true);
+    }).then(function () {
+      sendInFlight = false;
+    });
   }
 
   // ---- screenshot -------------------------------------------------------
@@ -594,10 +652,11 @@
     write:      { ctrl: true, alt: false, shift: false, code: "Slash" },
     list:       { ctrl: true, alt: false, shift: false, code: "BracketLeft" },
     copy:       { ctrl: true, alt: false, shift: false, code: "Quote" },
+    send:       { ctrl: true, alt: false, shift: false, code: "Backslash" },
     screenshot: { ctrl: true, alt: false, shift: false, code: "Semicolon" },
     settings:   { ctrl: true, alt: false, shift: false, code: "Comma" }
   };
-  var HK_ORDER = [["toggle", "Show / hide"], ["write", "Write (annotate)"], ["list", "List"], ["copy", "Copy all"], ["screenshot", "Screenshot"], ["settings", "Open settings"]];
+  var HK_ORDER = [["toggle", "Show / hide"], ["write", "Write (annotate)"], ["list", "List"], ["copy", "Copy all"], ["send", "Send to AI"], ["screenshot", "Screenshot"], ["settings", "Open settings"]];
   function cloneBinding(b) { return { ctrl: !!b.ctrl, alt: !!b.alt, shift: !!b.shift, code: String(b.code) }; }
   function safeLS(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 
@@ -1032,8 +1091,8 @@
 
   // ---- hotkeys ----------------------------------------------------------
   // Bindings are configurable (⚙) and matched by modifiers + e.code. Defaults:
-  // Ctrl+. show/hide · Ctrl+/ annotate · Ctrl+[ list · Ctrl+' copy · Ctrl+;
-  // screenshot. Form-local Esc/Ctrl+Enter are handled on the textareas above.
+  // Ctrl+. show/hide · Ctrl+/ annotate · Ctrl+[ list · Ctrl+' copy · Ctrl+\\ send
+  // · Ctrl+; screenshot. Form-local Esc/Ctrl+Enter are handled on the textareas above.
   window.addEventListener("keydown", function (e) {
     if (settingsOpen) { if (e.key === "Escape" && !capturing) { e.preventDefault(); closeSettings(); } return; } // settings owns the keyboard
     if (capturing) return;
@@ -1052,6 +1111,7 @@
         if (action === "write") setActive(!active);
         else if (action === "list") toggleList();
         else if (action === "copy") copyAll();
+        else if (action === "send") sendToAI();
         else if (action === "screenshot") takeScreenshot();
         else if (action === "settings") openSettings();
         return;
@@ -1063,7 +1123,7 @@
   window.__ffb_show = function () { setEnabled(true); };
   window.__ffb_teardown = function () {
     document.body.style.marginTop = prevBodyMt;
-    [bar, layer, boxwrap, form, panel, confirmEl, settingsEl, style].forEach(function (n) { if (n && n.remove) n.remove(); });
+    [bar, toast, layer, boxwrap, form, panel, confirmEl, settingsEl, style].forEach(function (n) { if (n && n.remove) n.remove(); });
     window.__ffb_loaded = false;
   };
 

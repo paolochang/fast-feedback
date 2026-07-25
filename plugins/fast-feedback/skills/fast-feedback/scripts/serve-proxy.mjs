@@ -23,10 +23,13 @@
 
 import http from "node:http";
 import net from "node:net";
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bootAssignments, applyUpdate, saveScreenshot } from "./settings.mjs";
+import * as inbox from "./inbox.mjs";
+import { isLoopbackHost, isOwnProxyOrigin } from "./proxy-guards.mjs";
 
 const argv = process.argv.slice(2);
 function opt(name, def) { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : def; }
@@ -37,6 +40,10 @@ if (!target) {
   process.exit(1);
 }
 const targetUrl = new URL(target);
+if (!argv.includes("--allow-remote") && !isLoopbackHost(targetUrl.hostname)) {
+  console.error("Refusing non-loopback --target; pass --allow-remote only for a target you trust.");
+  process.exit(1);
+}
 if (targetUrl.protocol !== "http:") {
   console.error("Only http:// dev servers are supported for now (an https dev server would need a local cert).\n" +
     "Most dev servers run on http://localhost — start yours on http, or run it without HTTPS for the review.");
@@ -45,6 +52,16 @@ if (targetUrl.protocol !== "http:") {
 const PORT = parseInt(opt("--port", "5000"), 10);
 const THOST = targetUrl.hostname;
 const TPORT = targetUrl.port || "80";
+const MAX_SEND_BODY_BYTES = 256 * 1024;
+
+// TASK-02 can inject this into window.__FFB_SEND when it builds the client boot
+// script. It is minted once for each proxy process and never logged.
+export const FFB_SEND_TOKEN = randomBytes(24).toString("hex");
+
+function sendJson(response, statusCode, payload) {
+  response.writeHead(statusCode, { "content-type": "application/json" });
+  response.end(JSON.stringify(payload));
+}
 
 // Build the overlay bundle exactly like the other modes: vendored html2canvas
 // (MIT) inlined ahead of the engine so Screenshot works offline, then the engine.
@@ -67,9 +84,12 @@ const saveFn = "window.__FFB_SAVE=function(p){try{fetch('/__ffb__/settings',{met
 // server writes it to the configured folder (the browser can't write a path
 // itself). Resolves to the saved absolute path so the overlay can show it.
 const saveShotFn = "window.__FFB_SAVE_SHOT=function(blob){return fetch('/__ffb__/screenshot',{method:'POST',headers:{'content-type':'image/png'},body:blob}).then(function(r){return r.json();}).then(function(j){return j&&j.path;});};";
+// window.__FFB_SEND posts only live feedback items. Unlike save settings, a
+// failed response rejects so the overlay can truthfully keep those items dirty.
+const sendFn = "window.__FFB_SEND=function(items){return fetch('/__ffb__/send',{method:'POST',headers:{'content-type':'application/json','x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "},body:JSON.stringify(items)}).then(function(r){if(!r.ok)throw new Error('Send failed: '+r.status);return r;});};";
 // Rebuilt per HTML response so a fresh reload reflects the latest saved settings.
 function bootScript() {
-  return "\n<script>window.__FFB_FILE=" + JSON.stringify(targetUrl.host) + ";" + bootAssignments() + saveFn + saveShotFn + "</script>\n" +
+  return "\n<script>window.__FFB_FILE=" + JSON.stringify(targetUrl.host) + ";" + bootAssignments() + saveFn + saveShotFn + sendFn + "</script>\n" +
     "<script>\n" + buildEngine() + "\n</script>\n";
 }
 
@@ -79,6 +99,59 @@ function bootScript() {
 const STRIP = new Set(["x-frame-options", "content-security-policy", "content-security-policy-report-only"]);
 
 const server = http.createServer(function (creq, cres) {
+  // Feedback submissions stay on the loopback-only proxy. Check all request
+  // guards before buffering/parsing a body, and never forward this route.
+  if (creq.method === "POST" && creq.url === "/__ffb__/send") {
+    if (creq.headers["x-ffb-token"] !== FFB_SEND_TOKEN || !isOwnProxyOrigin(creq.headers, PORT)) {
+      sendJson(cres, 403, { error: "forbidden" });
+      return;
+    }
+    if (String(creq.headers["content-type"] || "").split(";", 1)[0].trim().toLowerCase() !== "application/json") {
+      sendJson(cres, 415, { error: "content-type must be application/json" });
+      return;
+    }
+    if (Number(creq.headers["content-length"] || 0) > MAX_SEND_BODY_BYTES) {
+      sendJson(cres, 413, { error: "request body too large" });
+      return;
+    }
+
+    let size = 0;
+    let tooLarge = false;
+    const chunks = [];
+    creq.on("data", function (chunk) {
+      if (tooLarge) return;
+      size += chunk.length;
+      if (size > MAX_SEND_BODY_BYTES) {
+        tooLarge = true;
+        sendJson(cres, 413, { error: "request body too large" });
+        return;
+      }
+      chunks.push(chunk);
+    });
+    creq.on("end", async function () {
+      if (tooLarge) return;
+      let parsed;
+      try {
+        parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      } catch (error) {
+        sendJson(cres, 400, { error: "invalid JSON" });
+        return;
+      }
+      const items = Array.isArray(parsed) ? parsed : parsed && parsed.items;
+      if (!Array.isArray(items)) {
+        sendJson(cres, 400, { error: "items must be an array" });
+        return;
+      }
+      try {
+        await inbox.appendItems(items);
+        sendJson(cres, 200, { ok: true, count: await inbox.count() });
+      } catch (error) {
+        sendJson(cres, 500, { error: "could not store feedback" });
+      }
+    });
+    return;
+  }
+
   // Settings write-back from the overlay — persist to the on-disk file and don't
   // forward it to the dev server. Global hotkeys / this project's theme.
   if (creq.method === "POST" && creq.url === "/__ffb__/settings") {
@@ -168,7 +241,7 @@ server.on("upgrade", function (creq, csocket, head) {
   csocket.on("error", function () { psocket.destroy(); });
 });
 
-server.listen(PORT, function () {
+server.listen(PORT, "127.0.0.1", function () {
   console.log("fast-feedback proxy running:");
   console.log("  http://localhost:" + PORT + "  →  " + target);
   console.log("");
