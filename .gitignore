@@ -9,6 +9,10 @@ fast-feedback.snippet.js
 fast-feedback.bookmarklet.txt
 feedback-screenshot.png
 
+# feedback spool + history archive (inbox jsonl/md, pending items, history PNGs) —
+# local-only runtime data; screenshots may hold sensitive UI, never commit it
+.ffb/
+
 # project-scoped settings written by the overlay
 .claude/skills/fast-feedback/settings.json
 

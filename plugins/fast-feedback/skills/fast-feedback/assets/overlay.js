@@ -78,8 +78,16 @@
     '.__ffb_hint{color:var(--__ffb_mut);font-size:11px;align-self:center;margin-right:auto}',
     // panel (list)
     '.__ffb_panel{width:330px;max-height:70vh}',
+    '.__ffb_tabs{display:flex;gap:4px;padding:8px 10px 0;border-bottom:1px solid var(--__ffb_line)}',
+    '.__ffb_tab{border:0;border-bottom:2px solid transparent;background:none;color:var(--__ffb_mut);padding:0 2px 7px;font:700 12px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;cursor:pointer}',
+    '.__ffb_tab.sel{color:var(--__ffb_gold);border-color:var(--__ffb_gold)}',
     '.__ffb_panel .__ffb_list{overflow:auto;padding:10px;display:flex;flex-direction:column;gap:8px}',
     '.__ffb_empty{color:var(--__ffb_mut);font-size:12.5px;text-align:center;padding:14px 8px}',
+    // Loading indicator — visually distinct from the empty state (a spinner), so a
+    // tab switch to History reads as "loading", not a blank/empty panel.
+    '.__ffb_loading{display:flex;flex-direction:column;align-items:center;gap:10px;color:var(--__ffb_mut);font-size:12.5px;padding:28px 8px}',
+    '.__ffb_spin{width:22px;height:22px;border:2.5px solid var(--__ffb_line);border-top-color:var(--__ffb_gold);border-radius:50%;animation:__ffb_spin .7s linear infinite}',
+    '@keyframes __ffb_spin{to{transform:rotate(360deg)}}',
     '.__ffb_item{position:relative;border:1px solid var(--__ffb_line);border-radius:8px;padding:8px 8px 8px 10px;background:var(--__ffb_card)}',
     '.__ffb_item .__ffb_n{color:var(--__ffb_gold);font-weight:800;font-size:12px;margin-right:6px}',
     '.__ffb_item .__ffb_isel{color:var(--__ffb_mut);font-size:11px;word-break:break-all}',
@@ -91,6 +99,21 @@
     '.__ffb_ic:hover{border-color:var(--__ffb_gold)}',
     '.__ffb_item textarea{box-sizing:border-box;width:100%;background:var(--__ffb_field);color:var(--__ffb_ink);border:1px solid var(--__ffb_line);border-radius:6px;padding:6px 8px;font-size:13px;font-family:inherit;resize:vertical;min-height:52px}',
     '.__ffb_item .__ffb_iact{display:flex;gap:6px;justify-content:flex-end;margin-top:6px}',
+    '.__ffb_hist{display:flex;gap:9px}',
+    '.__ffb_histthumb{width:72px;height:52px;flex:none;object-fit:cover;border:1px solid var(--__ffb_line);border-radius:5px;background:var(--__ffb_field)}',
+    '.__ffb_histbody{min-width:0;flex:1}',
+    '.__ffb_histmeta{color:var(--__ffb_mut);font-size:11px}',
+    '.__ffb_histpreview{color:var(--__ffb_ink);font-size:12.5px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+    '.__ffb_hist{cursor:pointer}',
+    '.__ffb_histdetail{display:flex;flex-direction:column;gap:8px}',
+    '.__ffb_histshot{position:relative;width:100%;line-height:0}',
+    '.__ffb_histshot img{display:block;width:100%;height:auto;cursor:zoom-in}',
+    '.__ffb_histshot .__ffb_box{pointer-events:none}',
+    '.__ffb_histlightbox{position:fixed;z-index:2147483647;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center}',
+    '.__ffb_histlightboxshot{position:relative;line-height:0}',
+    '.__ffb_histlightboxshot img{display:block;max-width:92vw;max-height:92vh;width:auto;height:auto;object-fit:contain}',
+    '.__ffb_histlightboxshot .__ffb_box{pointer-events:none}',
+    '.__ffb_histlightboxx{position:absolute;top:12px;right:12px;z-index:1;border:0;background:var(--__ffb_surf);color:var(--__ffb_ink);border-radius:50%;width:30px;height:30px;cursor:pointer;font-size:18px;line-height:1}',
     // confirm
     '.__ffb_confirm{position:fixed;z-index:2147483647;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center}',
     '.__ffb_confirm.open{display:flex}',
@@ -252,11 +275,14 @@
     '<button class="__ffb_btn" id="__ffb_pcopy" style="padding:3px 9px">Copy</button>' +
     '<button class="__ffb_btn" id="__ffb_pclear" style="padding:3px 9px">Clear</button>' +
     '<button class="__ffb_x" title="Close">✕</button></div>' +
+    '<div class="__ffb_tabs"><button class="__ffb_tab sel" data-tab="live">Live</button><button class="__ffb_tab" data-tab="history">History</button></div>' +
     '<div class="__ffb_list" id="__ffb_items"></div>' +
     '<div id="__ffb_foot" style="padding:10px 12px;border-top:1px solid var(--__ffb_line);display:flex">' +
     '<button class="__ffb_btn primary" id="__ffb_psend" title="Send new feedback to AI" style="flex:1;padding:8px 12px">Send to AI</button></div>';
   root.appendChild(panel);
   var itemsEl = panel.querySelector("#__ffb_items");
+  var activeListTab = "live", historyRows = null, historyLoading = false, historyError = false;
+  var historyVisibleCount = 10, historyObjectUrls = [], historyObserver = null, historyDetailId = null, historyLightbox = null;
 
   // ---- confirm dialog ---------------------------------------------------
   var confirmEl = document.createElement("div");
@@ -422,7 +448,7 @@
   // ---- list (read-only + inline edit) ----------------------------------
   var editingN = null;
   function openList() { panel.classList.add("open"); if (!panel.style.left) { panel.style.right = "auto"; panel.style.left = (window.innerWidth - 350) + "px"; panel.style.top = (BAR_H + 12) + "px"; } renderList(); }
-  function toggleList() { if (panel.classList.contains("open")) panel.classList.remove("open"); else openList(); }
+  function toggleList() { if (panel.classList.contains("open")) closeList(); else openList(); }
   function flashBox(n) {
     var a = anns.filter(function (x) { return x.n === n; })[0];
     if (a && a.boxEl) { a.boxEl.classList.remove("flash"); void a.boxEl.offsetWidth; a.boxEl.classList.add("flash"); a.boxEl.scrollIntoView({ block: "center", behavior: "smooth" }); }
@@ -433,8 +459,111 @@
   }
   function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
 
+  function hasIndexedDb() {
+    try { return !!window.indexedDB; } catch (e) { return false; }
+  }
+
+  var historyStore = (function () {
+    var dbPromise;
+
+    function openDb() {
+      if (!dbPromise) {
+        dbPromise = new Promise(function (resolve, reject) {
+          var request;
+          try {
+            if (!hasIndexedDb()) throw new Error("IndexedDB is unavailable");
+            request = window.indexedDB.open("ffb", 1);
+          } catch (e) {
+            reject(e);
+            return;
+          }
+          request.onupgradeneeded = function () {
+            var db = request.result;
+            if (!db.objectStoreNames.contains("history")) db.createObjectStore("history", { keyPath: "id" });
+          };
+          request.onsuccess = function () { resolve(request.result); };
+          request.onerror = function () { reject(request.error); };
+        });
+      }
+      return dbPromise;
+    }
+
+    function requestStore(mode, action) {
+      return openDb().then(function (db) {
+        return new Promise(function (resolve, reject) {
+          // Resolve on the TRANSACTION's completion, not the request's onsuccess:
+          // a put request can succeed yet the transaction still abort at commit
+          // time (quota / storage failure). Resolving on the request alone would
+          // report a durable archive that never committed, and sendToAI would
+          // clear the annotations — silent data loss. oncomplete fires only after
+          // a durable commit; onabort/onerror reject.
+          var tx = db.transaction("history", mode);
+          var request = action(tx.objectStore("history"));
+          var result;
+          request.onsuccess = function () { result = request.result; };
+          request.onerror = function () { reject(request.error); };
+          tx.oncomplete = function () { resolve(result); };
+          tx.onabort = function () { reject(tx.error || new Error("IndexedDB transaction aborted")); };
+          tx.onerror = function () { reject(tx.error || new Error("IndexedDB transaction failed")); };
+        });
+      });
+    }
+
+    function getRecord(id) {
+      return requestStore("readonly", function (store) { return store.get(id); });
+    }
+
+    return {
+      archive: function (meta, pngBlob) {
+        if (typeof window.__FFB_ARCHIVE === "function") {
+          var json = new TextEncoder().encode(JSON.stringify(meta));
+          var framing = new TextEncoder().encode(String(json.length) + "\n");
+          try {
+            return Promise.resolve(window.__FFB_ARCHIVE(new Blob([framing, json, pngBlob], { type: "application/x-ffb-history" })));
+          } catch (e) {
+            return Promise.reject(e);
+          }
+        }
+        return requestStore("readwrite", function (store) { return store.put({ id: meta.id, meta: meta, pngBlob: pngBlob }); });
+      },
+      list: function () {
+        if (typeof window.__FFB_HISTORY_LIST === "function") {
+          try { return Promise.resolve(window.__FFB_HISTORY_LIST()); } catch (e) { return Promise.reject(e); }
+        }
+        return requestStore("readonly", function (store) { return store.getAll(); }).then(function (records) {
+          return records.map(function (record) {
+            var meta = record.meta || {}, preview = "";
+            (Array.isArray(meta.items) ? meta.items : []).some(function (item) {
+              if (String(item.comment || "").trim()) { preview = item.comment; return true; }
+              return false;
+            });
+            return { id: record.id, ts: meta.ts, url: meta.url, count: (meta.items || []).length, preview: preview };
+          }).sort(function (a, b) { return (Date.parse(b.ts) || 0) - (Date.parse(a.ts) || 0); });
+        });
+      },
+      getMeta: function (id) {
+        if (typeof window.__FFB_HISTORY_META === "function") {
+          try { return Promise.resolve(window.__FFB_HISTORY_META(id)); } catch (e) { return Promise.reject(e); }
+        }
+        return getRecord(id).then(function (record) { return record && record.meta; });
+      },
+      getBlob: function (id) {
+        if (typeof window.__FFB_HISTORY_BLOB === "function") {
+          try { return Promise.resolve(window.__FFB_HISTORY_BLOB(id)); } catch (e) { return Promise.reject(e); }
+        }
+        return getRecord(id).then(function (record) { return record && record.pngBlob; });
+      }
+    };
+  }());
+
   function renderList() {
     updateCount();
+    if (activeListTab === "history") { renderHistory(); return; }
+    clearHistoryThumbs();
+    renderLiveList();
+  }
+
+  function renderLiveList() {
     itemsEl.innerHTML = "";
     if (!anns.length) { itemsEl.innerHTML = '<div class="__ffb_empty">No feedback yet.<br>Arm Write and drag a box over the page.</div>'; return; }
     anns.forEach(function (a) {
@@ -449,7 +578,7 @@
         setTimeout(function () { ta.focus(); }, 0);
         var save = function () {
           var comment = ta.value.trim();
-          if (comment !== a.comment) { a.comment = comment; a.sent = false; a.revision++; }
+          if (comment !== a.comment) { a.comment = comment; a.sentToInbox = false; a.revision++; }
           editingN = null; renderList();
         };
         var closeEdit = function () {
@@ -474,7 +603,205 @@
       itemsEl.appendChild(item);
     });
   }
-  panel.querySelector(".__ffb_x").onclick = function () { panel.classList.remove("open"); };
+
+  function clearHistoryThumbs() {
+    closeHistoryLightbox();
+    if (historyObserver) { historyObserver.disconnect(); historyObserver = null; }
+    historyObjectUrls.forEach(function (url) { URL.revokeObjectURL(url); });
+    historyObjectUrls = [];
+  }
+
+  function appendHistoryBox(container, entry) {
+    var region = entry.region || {}, box = document.createElement("div");
+    box.className = "__ffb_box";
+    box.style.left = Number(region.x) + "%";
+    box.style.top = Number(region.y) + "%";
+    box.style.width = Number(region.w) + "%";
+    box.style.height = Number(region.h) + "%";
+    var badge = document.createElement("div");
+    badge.className = "__ffb_num";
+    badge.textContent = entry.n;
+    box.appendChild(badge);
+    container.appendChild(box);
+  }
+
+  function closeHistoryLightbox() {
+    if (!historyLightbox) return;
+    document.removeEventListener("keydown", historyLightbox.onKeydown);
+    historyLightbox.el.remove();
+    historyLightbox = null;
+  }
+
+  function openHistoryLightbox(url, meta) {
+    closeHistoryLightbox();
+    var lightbox = document.createElement("div");
+    lightbox.className = "__ffb_histlightbox";
+    var close = document.createElement("button");
+    close.className = "__ffb_histlightboxx";
+    close.textContent = "✕";
+    close.title = "Close";
+    var shot = document.createElement("div");
+    shot.className = "__ffb_histlightboxshot";
+    var image = document.createElement("img");
+    image.src = url;
+    image.alt = "Archived feedback screenshot";
+    shot.appendChild(image);
+    (Array.isArray(meta && meta.items) ? meta.items : []).forEach(function (entry) { appendHistoryBox(shot, entry); });
+    lightbox.appendChild(close);
+    lightbox.appendChild(shot);
+    root.appendChild(lightbox);
+    var onKeydown = function (event) { if (event.key === "Escape") closeHistoryLightbox(); };
+    historyLightbox = { el: lightbox, onKeydown: onKeydown };
+    close.onclick = closeHistoryLightbox;
+    lightbox.onclick = function (event) { if (event.target === lightbox) closeHistoryLightbox(); };
+    document.addEventListener("keydown", onKeydown);
+  }
+
+  function historyTime(ts) {
+    var date = new Date(ts);
+    return isNaN(date.getTime()) ? String(ts || "") : date.toLocaleString();
+  }
+
+  function loadHistoryThumb(img, id) {
+    if (img.getAttribute("data-loading")) return;
+    img.setAttribute("data-loading", "1");
+    historyStore.getBlob(id).then(function (blob) {
+      var url = URL.createObjectURL(blob);
+      if (!img.isConnected || activeListTab !== "history") { URL.revokeObjectURL(url); return; }
+      historyObjectUrls.push(url);
+      img.src = url;
+    }).catch(function () {
+      if (img.isConnected) img.alt = "Thumbnail unavailable";
+    });
+  }
+
+  function observeHistoryThumb(img, id) {
+    if (typeof IntersectionObserver !== "function") { loadHistoryThumb(img, id); return; }
+    if (!historyObserver) {
+      historyObserver = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (!entry.isIntersecting) return;
+          historyObserver.unobserve(entry.target);
+          loadHistoryThumb(entry.target, entry.target.getAttribute("data-history-id"));
+        });
+      }, { root: itemsEl, rootMargin: "80px 0px" });
+    }
+    historyObserver.observe(img);
+  }
+
+  function renderHistoryRows() {
+    clearHistoryThumbs();
+    itemsEl.innerHTML = "";
+    if (!historyRows.length) {
+      itemsEl.innerHTML = '<div class="__ffb_empty">No archived feedback yet.<br>Sent feedback batches appear here.</div>';
+      return;
+    }
+    historyRows.slice(0, historyVisibleCount).forEach(function (row) {
+      var item = document.createElement("div"), count = Number(row.count) || 0;
+      item.className = "__ffb_item __ffb_hist";
+      item.innerHTML = '<img class="__ffb_histthumb" alt="Loading thumbnail" data-history-id="' + esc(String(row.id || "")) + '">' +
+        '<div class="__ffb_histbody"><div class="__ffb_histmeta">' + esc(historyTime(row.ts)) + ' · ' + count + ' item' + (count === 1 ? "" : "s") + '</div>' +
+        '<div class="__ffb_histpreview">' + esc(String(row.preview || "(no preview)")) + '</div></div>';
+      var thumb = item.querySelector(".__ffb_histthumb");
+      item.onclick = function () { openHistoryDetail(row.id); };
+      itemsEl.appendChild(item);
+      observeHistoryThumb(thumb, row.id);
+    });
+    if (historyRows.length > historyVisibleCount) {
+      var more = document.createElement("button");
+      more.className = "__ffb_btn";
+      more.textContent = "Load more";
+      more.onclick = function () { historyVisibleCount += 10; renderHistoryRows(); };
+      itemsEl.appendChild(more);
+    }
+  }
+
+  function openHistoryDetail(id) {
+    historyDetailId = id;
+    renderList();
+  }
+
+  function renderHistoryDetail(id) {
+    clearHistoryThumbs();
+    itemsEl.innerHTML = '<div class="__ffb_empty">Loading archived feedback…</div>';
+    Promise.all([
+      historyStore.getMeta(id),
+      historyStore.getBlob(id)
+    ]).then(function (result) {
+      var meta = result[0], blob = result[1], url = URL.createObjectURL(blob);
+      if (historyDetailId !== id || activeListTab !== "history" || !panel.classList.contains("open")) { URL.revokeObjectURL(url); return; }
+      historyObjectUrls.push(url);
+      itemsEl.innerHTML = "";
+      var detail = document.createElement("div");
+      detail.className = "__ffb_histdetail";
+      var back = document.createElement("button");
+      back.className = "__ffb_btn";
+      back.textContent = "← Back to History";
+      back.onclick = function () { historyDetailId = null; renderList(); };
+      var shot = document.createElement("div");
+      shot.className = "__ffb_histshot";
+      var image = document.createElement("img");
+      image.src = url;
+      image.alt = "Archived feedback screenshot";
+      image.onclick = function () { openHistoryLightbox(url, meta); };
+      shot.appendChild(image);
+      var comments = document.createElement("div");
+      (Array.isArray(meta && meta.items) ? meta.items : []).forEach(function (entry) {
+        appendHistoryBox(shot, entry);
+        var comment = document.createElement("div");
+        comment.className = "__ffb_item";
+        comment.innerHTML = '<div><span class="__ffb_n">[' + esc(String(entry.n)) + ']</span><span class="__ffb_isel">' + esc(String(entry.sel || "")) + '</span></div>' +
+          '<div class="__ffb_cmt">' + (entry.comment ? esc(String(entry.comment)) : '<span style="color:var(--__ffb_mut)">(no comment)</span>') + '</div>';
+        comments.appendChild(comment);
+      });
+      detail.appendChild(back);
+      detail.appendChild(shot);
+      detail.appendChild(comments);
+      itemsEl.appendChild(detail);
+    }).catch(function () {
+      if (historyDetailId === id && activeListTab === "history" && panel.classList.contains("open")) {
+        itemsEl.innerHTML = '<div class="__ffb_empty">Could not load this archived feedback.</div>';
+      }
+    });
+  }
+
+  function renderHistory() {
+    clearHistoryThumbs();
+    itemsEl.innerHTML = "";
+    if (historyDetailId !== null) { renderHistoryDetail(historyDetailId); return; }
+    if (typeof window.__FFB_HISTORY_LIST !== "function" && !hasIndexedDb()) {
+      itemsEl.innerHTML = '<div class="__ffb_empty">History is available when Fast Feedback is served through the proxy.</div>';
+      return;
+    }
+    if (historyLoading) { itemsEl.innerHTML = '<div class="__ffb_loading"><div class="__ffb_spin"></div>Loading history…</div>'; return; }
+    if (historyError) { itemsEl.innerHTML = '<div class="__ffb_empty">Could not load history right now.</div>'; return; }
+    if (historyRows) { renderHistoryRows(); return; }
+    historyLoading = true;
+    itemsEl.innerHTML = '<div class="__ffb_loading"><div class="__ffb_spin"></div>Loading history…</div>';
+    historyStore.list().then(function (rows) {
+      historyRows = Array.isArray(rows) ? rows.slice().sort(function (a, b) { return (Date.parse(b.ts) || 0) - (Date.parse(a.ts) || 0); }) : [];
+      historyLoading = false;
+      if (activeListTab === "history") renderList();
+    }).catch(function () {
+      historyLoading = false;
+      historyError = true;
+      if (activeListTab === "history") renderList();
+    });
+  }
+
+  function setListTab(tab) {
+    activeListTab = tab;
+    panel.querySelectorAll(".__ffb_tab").forEach(function (button) { button.classList.toggle("sel", button.getAttribute("data-tab") === tab); });
+    historyDetailId = null;
+    // Reset both cache and error so switching to History always shows the loading
+    // spinner and refetches (a prior error must not persist as a stale message).
+    if (tab === "history") { historyRows = null; historyError = false; }
+    renderList();
+  }
+
+  panel.querySelectorAll(".__ffb_tab").forEach(function (button) { button.onclick = function () { setListTab(button.getAttribute("data-tab")); }; });
+  function closeList() { historyDetailId = null; clearHistoryThumbs(); panel.classList.remove("open"); }
+  panel.querySelector(".__ffb_x").onclick = closeList;
   panel.querySelector("#__ffb_psend").onclick = sendToAI;
   panel.querySelector("#__ffb_pcopy").onclick = copyAll;
   panel.querySelector("#__ffb_pclear").onclick = clearAll;
@@ -517,38 +844,102 @@
   }
 
   // ---- send to AI --------------------------------------------------------
-  // Live/proxy mode injects __FFB_SEND. File and console modes keep Copy All as
-  // their universal fallback, so never assume that function exists here.
+  // Live/proxy mode injects __FFB_SEND. File and console modes archive locally
+  // through historyStore, keeping Copy All as the universal fallback.
   var sendInFlight = false;
   function sendToAI() {
-    if (typeof window.__FFB_SEND !== "function") { showToast("No server — use Copy All", false); return; }
+    var canSend = typeof window.__FFB_SEND === "function";
+    var canArchive = typeof window.__FFB_ARCHIVE === "function" || hasIndexedDb();
+    if (!canSend && !canArchive) { showToast("No server — use Copy All", false); return; }
     if (sendInFlight) { showToast("Sending…", false); return; }
-    var pending = anns.filter(function (a) { return !a.sent; });
-    if (!pending.length) { showToast("Nothing new to send", false); return; }
-    var sent = pending.map(function (a) {
+    // Don't start a flush while a manual Screenshot capture is running: captures
+    // serialize (they need contradictory box visibility), so the archive capture
+    // would queue AFTER we froze the rects/URL and dispatched the send — a page
+    // change during that delay would archive T0 regions over a newer screenshot.
+    // When no capture is active the archive capture starts immediately (chain
+    // free), keeping the snapshot coherent. Rare — needs a near-simultaneous click.
+    if (capturesInFlight > 0) { showToast("Screenshot in progress — try again", false); return; }
+    if (!anns.length) { showToast("Nothing new to send", false); return; }
+    var snapshot = anns.map(function (a) {
+      // Freeze the box geometry (document-absolute, scroll-invariant) at flush
+      // start. If the user deletes/clears an annotation while the send is in
+      // flight, its boxEl detaches and getBoundingClientRect() would read zeros —
+      // archiving the highlight collapsed at top-left. Read it once, up front.
+      var r = a.boxEl ? a.boxEl.getBoundingClientRect() : null;
       return {
         ann: a,
+        id: a.id,
         revision: a.revision,
-        item: { id: a.id, n: a.n, sel: a.sel, region: a.region, comment: a.comment, url: location.href, ts: new Date().toISOString() }
+        rect: r ? { left: r.left + window.pageXOffset, top: r.top + window.pageYOffset, width: r.width, height: r.height } : null
       };
     });
-    var items = sent.map(function (entry) { return entry.item; });
+    var items = snapshot.map(function (entry) {
+      var a = entry.ann;
+      return { id: entry.id, n: a.n, sel: a.sel, region: a.region, comment: a.comment, url: location.href, ts: new Date().toISOString() };
+    });
+    var toSend = snapshot.filter(function (entry) { return !entry.ann.sentToInbox; });
     var request;
+    var sentToInbox = false;
+    var archiveStarted = false;
+    var flushUrl = location.href;   // freeze the URL at flush start (see capturePromise)
     sendInFlight = true;
     try {
-      request = window.__FFB_SEND(items);
+      request = canSend && toSend.length ? window.__FFB_SEND(toSend.map(function (entry) {
+        var a = entry.ann;
+        return { id: entry.id, n: a.n, sel: a.sel, region: a.region, comment: a.comment, url: location.href, ts: new Date().toISOString() };
+      })) : null;
     } catch (e) {
       sendInFlight = false;
       showToast("Send failed — items kept", true);
       return;
     }
+    // Capture the page at flush start, in parallel with the already-dispatched
+    // send, so the screenshot, frozen box geometry, and URL are one coherent
+    // snapshot: an SPA nav/resize/reflow during the in-flight send can't smear a
+    // newer screenshot (or route) over regions frozen at flush start. The send
+    // stays independent of capture — inbox delivery must not hinge on html2canvas.
+    var capturePromise = capturePng(true);
+    capturePromise.catch(function () {});   // send-fail paths discard it; avoid an unhandled rejection
     Promise.resolve(request).then(function () {
-      sent.forEach(function (entry) {
-        if (entry.ann.revision === entry.revision) entry.ann.sent = true;
+      if (canSend && toSend.length) {
+        sentToInbox = true;
+        // Only mark the revision we actually sent as delivered. If the user edited
+        // this annotation while the send was in flight (edit resets sentToInbox to
+        // false and bumps revision), leave it unsent so the edited comment is
+        // re-delivered to the inbox on the next flush.
+        toSend.forEach(function (entry) { if (entry.ann.revision === entry.revision) entry.ann.sentToInbox = true; });
+      }
+      archiveStarted = true;
+      return capturePromise.then(function (capture) {
+        var meta = {
+          id: crypto.randomUUID(),
+          ts: new Date().toISOString(),
+          url: flushUrl,
+          capture: { w: capture.w, h: capture.h },
+          items: snapshot.map(function (entry, index) {
+            var item = items[index];
+            return {
+              id: entry.id,
+              n: item.n,
+              sel: item.sel,
+              region: captureRegion(entry.rect, capture),
+              comment: item.comment
+            };
+          })
+        };
+        return historyStore.archive(meta, capture.blob);
       });
-      showToast("Sent " + items.length + " items ✓", false);
+    }).then(function () {
+      var flushed = snapshot.filter(function (entry) { return entry.ann.revision === entry.revision && anns.indexOf(entry.ann) !== -1; });
+      flushed.forEach(function (entry) { if (entry.ann.boxEl) entry.ann.boxEl.remove(); });
+      anns = anns.filter(function (a) { return !flushed.some(function (entry) { return entry.ann === a; }); });
+      historyRows = null;
+      historyError = false;
+      historyVisibleCount = 10;
+      renderList();
+      showToast((sentToInbox ? "Sent " : "Archived ") + items.length + " items ✓", false);
     }).catch(function () {
-      showToast("Send failed — items kept", true);
+      showToast(archiveStarted ? "Archive failed — items kept" : "Send failed — items kept", true);
     }).then(function () {
       sendInFlight = false;
     });
@@ -567,35 +958,90 @@
   // copy tied to the button's user-gesture while the render finishes. If the
   // clipboard is blocked (permissions / not focused / unsupported, e.g. over
   // file://) we fall back to downloading the PNG so the shot is never lost.
-  function takeScreenshot() {
+  // Serialize captures: capturePng mutates shared DOM state (hides chrome,
+  // removes the body spacer) and restores it on completion. Two overlapping
+  // captures — e.g. the Screenshot hotkey pressed during the Send flush's
+  // parallel capture — would each snapshot the OTHER's temporary state as the
+  // "original" and restore to it, leaving the overlay hidden / spacer removed.
+  // Chain each capture after the previous one fully settles so they never overlap.
+  var captureChain = Promise.resolve();
+  var capturesInFlight = 0;   // running OR queued; Send bails if a capture is active (see sendToAI)
+  function capturePng(hideBoxes) {
+    capturesInFlight++;
+    var run = function () { return capturePngNow(hideBoxes); };
+    var result = captureChain.then(run, run);
+    captureChain = result.catch(function () {});
+    var settle = function () { capturesInFlight--; };
+    result.then(settle, settle);
+    return result;
+  }
+  function capturePngNow(hideBoxes) {
     var h2c = window.html2canvas;
-    if (typeof h2c !== "function") {
-      alert("Screenshot needs the bundled html2canvas, which didn't load on this page.");
-      return;
-    }
-    var b = bar.querySelector("#__ffb_shotbtn"), prev = b.innerHTML;
-    b.textContent = "Capturing…";
+    if (typeof h2c !== "function") return Promise.reject(new Error("Screenshot needs the bundled html2canvas, which didn't load on this page."));
     var chrome = [bar, panel, form, confirmEl, layer];
+    if (hideBoxes) chrome.push(boxwrap);
     var vis = chrome.map(function (n) { return n.style.visibility; });
     chrome.forEach(function (n) { n.style.visibility = "hidden"; });
     var mt = document.body.style.marginTop;      // drop the top strip's spacer
+    var bodyTop = document.body.getBoundingClientRect().top;
     document.body.style.marginTop = prevBodyMt;   // so there's no empty band
+    var captureShiftY = bodyTop - document.body.getBoundingClientRect().top;
     var restored = false;
     var restore = function () {
       if (restored) return; restored = true;
       chrome.forEach(function (n, i) { n.style.visibility = vis[i]; });
       document.body.style.marginTop = mt;
     };
+    // Freeze the document dimensions BEFORE html2canvas clones the DOM: the canvas
+    // reflects the document at render start, so normalizing regions against a
+    // later live scrollWidth/Height (an SPA resize mid-render) would shift every
+    // box. Read after the spacer removal above so it matches the rendered canvas.
+    var captureDocW = document.documentElement.scrollWidth || 1;
+    var captureDocH = document.documentElement.scrollHeight || 1;
+    try {
+      return Promise.resolve(h2c(document.documentElement, { backgroundColor: null, useCORS: true, logging: false, scale: window.devicePixelRatio || 1 }))
+        .then(function (canvas) {
+          var capture = { w: canvas.width, h: canvas.height, docW: captureDocW, docH: captureDocH, shiftY: captureShiftY };
+          restore();
+          return new Promise(function (res, rej) {
+            canvas.toBlob(function (blob) { blob ? res({ blob: blob, capture: capture }) : rej(new Error("toBlob returned null")); }, "image/png");
+          });
+        }).then(function (result) {
+          result.capture.blob = result.blob;
+          return result.capture;
+        }).catch(function (err) { restore(); throw err; });
+    } catch (err) {
+      restore();
+      return Promise.reject(err);
+    }
+  }
+
+  // rect is the box's document-absolute geometry frozen at flush start
+  // (see sendToAI's snapshot). Passing the stored rect — not the live boxEl —
+  // keeps replay correct even if the annotation was deleted mid-send.
+  function captureRegion(rect, capture) {
+    if (!rect) return { x: 0, y: 0, w: 0, h: 0 };
+    var scaleX = capture.w / capture.docW, scaleY = capture.h / capture.docH;
+    var pct = function (v, total) { return Math.max(0, Math.min(100, Math.round((v / total) * 10000) / 100)); };
+    return {
+      x: pct(rect.left * scaleX, capture.w),
+      y: pct((rect.top - capture.shiftY) * scaleY, capture.h),
+      w: pct(rect.width * scaleX, capture.w),
+      h: pct(rect.height * scaleY, capture.h)
+    };
+  }
+
+  function takeScreenshot() {
+    if (typeof window.html2canvas !== "function") {
+      alert("Screenshot needs the bundled html2canvas, which didn't load on this page.");
+      return;
+    }
+    var b = bar.querySelector("#__ffb_shotbtn"), prev = b.innerHTML;
+    b.textContent = "Capturing…";
     var done = function (label) { b.textContent = label; setTimeout(function () { b.innerHTML = prev; }, 1400); };
 
     // Render → PNG blob. Restore our chrome the moment the canvas is ready.
-    var blobPromise = h2c(document.documentElement, { backgroundColor: null, useCORS: true, logging: false, scale: window.devicePixelRatio || 1 })
-      .then(function (canvas) {
-        restore();
-        return new Promise(function (res, rej) {
-          canvas.toBlob(function (blob) { blob ? res(blob) : rej(new Error("toBlob returned null")); }, "image/png");
-        });
-      });
+    var blobPromise = capturePng(false).then(function (capture) { return capture.blob; });
 
     // Put a copy on disk. Live/proxy mode POSTs the PNG and the server writes it
     // to the configured folder; file/console mode has no server, so it falls back
@@ -618,7 +1064,7 @@
     // Clipboard blocked / unsupported → still save the shot so it's never lost.
     function saveOnly() {
       blobPromise.then(persistShot).then(function (res) { done(res && res.how === "folder" ? "Saved to folder ✓" : "Saved ✓"); })
-        .catch(function (err) { restore(); b.innerHTML = prev; alert("Screenshot failed: " + (err && err.message ? err.message : err)); });
+        .catch(function (err) { b.innerHTML = prev; alert("Screenshot failed: " + (err && err.message ? err.message : err)); });
     }
 
     if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
@@ -1086,7 +1532,7 @@
     bar.style.display = v ? "flex" : "none";
     boxwrap.style.display = v ? "" : "none";
     document.body.style.marginTop = v ? (BAR_H + "px") : prevBodyMt;
-    if (!v) { panel.classList.remove("open"); form.classList.remove("open"); confirmEl.classList.remove("open"); closeSettings(); setActive(false); }
+    if (!v) { closeList(); form.classList.remove("open"); confirmEl.classList.remove("open"); closeSettings(); setActive(false); }
   }
 
   // ---- hotkeys ----------------------------------------------------------
@@ -1123,6 +1569,7 @@
   window.__ffb_show = function () { setEnabled(true); };
   window.__ffb_teardown = function () {
     document.body.style.marginTop = prevBodyMt;
+    clearHistoryThumbs();
     [bar, toast, layer, boxwrap, form, panel, confirmEl, settingsEl, style].forEach(function (n) { if (n && n.remove) n.remove(); });
     window.__ffb_loaded = false;
   };

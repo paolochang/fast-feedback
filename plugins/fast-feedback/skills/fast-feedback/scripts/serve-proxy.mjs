@@ -24,11 +24,12 @@
 import http from "node:http";
 import net from "node:net";
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { createReadStream, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bootAssignments, applyUpdate, saveScreenshot } from "./settings.mjs";
 import * as inbox from "./inbox.mjs";
+import * as history from "./history.mjs";
 import { isLoopbackHost, isOwnProxyOrigin } from "./proxy-guards.mjs";
 
 const argv = process.argv.slice(2);
@@ -53,6 +54,7 @@ const PORT = parseInt(opt("--port", "5000"), 10);
 const THOST = targetUrl.hostname;
 const TPORT = targetUrl.port || "80";
 const MAX_SEND_BODY_BYTES = 256 * 1024;
+const MAX_HISTORY_BODY_BYTES = 12 * 1024 * 1024;
 
 // TASK-02 can inject this into window.__FFB_SEND when it builds the client boot
 // script. It is minted once for each proxy process and never logged.
@@ -61,6 +63,40 @@ export const FFB_SEND_TOKEN = randomBytes(24).toString("hex");
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, { "content-type": "application/json" });
   response.end(JSON.stringify(payload));
+}
+
+function historySummary(meta) {
+  const items = Array.isArray(meta.items) ? meta.items : [];
+  const preview = items.find((item) => typeof item?.comment === "string" && item.comment.trim())?.comment.trim().slice(0, 160) || "";
+  return { id: meta.id, ts: meta.ts, url: meta.url, count: items.length, preview };
+}
+
+async function markedHistoryBatch(id) {
+  return (await history.listBatches()).find((batch) => batch.id.toLowerCase() === id.toLowerCase());
+}
+
+function historyPngPath(id) {
+  const inboxDir = process.env.FFB_INBOX ? resolve(process.env.FFB_INBOX) : join(process.cwd(), ".ffb");
+  return join(inboxDir, "history", id + ".png");
+}
+
+function parseHistoryBody(body) {
+  const newline = body.indexOf(0x0a);
+  if (newline < 1) throw new TypeError("invalid history framing");
+  const lengthText = body.subarray(0, newline).toString("ascii");
+  if (!/^\d+$/.test(lengthText)) throw new TypeError("invalid history framing");
+  const jsonLength = Number(lengthText);
+  const jsonStart = newline + 1;
+  const jsonEnd = jsonStart + jsonLength;
+  if (!Number.isSafeInteger(jsonLength) || jsonEnd > body.length) throw new TypeError("invalid history framing");
+  let meta;
+  try {
+    meta = JSON.parse(body.subarray(jsonStart, jsonEnd).toString("utf8"));
+  } catch {
+    throw new TypeError("invalid history metadata");
+  }
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) throw new TypeError("invalid history metadata");
+  return { meta, png: body.subarray(jsonEnd) };
 }
 
 // Build the overlay bundle exactly like the other modes: vendored html2canvas
@@ -87,9 +123,18 @@ const saveShotFn = "window.__FFB_SAVE_SHOT=function(blob){return fetch('/__ffb__
 // window.__FFB_SEND posts only live feedback items. Unlike save settings, a
 // failed response rejects so the overlay can truthfully keep those items dirty.
 const sendFn = "window.__FFB_SEND=function(items){return fetch('/__ffb__/send',{method:'POST',headers:{'content-type':'application/json','x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "},body:JSON.stringify(items)}).then(function(r){if(!r.ok)throw new Error('Send failed: '+r.status);return r;});};";
+// window.__FFB_ARCHIVE posts a length-prefixed history batch. It uses the same
+// per-proxy token as __FFB_SEND and rejects non-2xx responses so the overlay
+// can keep the flushed boxes visible for a retry.
+const archiveFn = "window.__FFB_ARCHIVE=function(body){return fetch('/__ffb__/history',{method:'POST',headers:{'content-type':'application/x-ffb-history','x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "},body:body}).then(function(r){if(!r.ok)throw new Error('Archive failed: '+r.status);return r;});};";
+// History reads need the same per-proxy token as sends. The overlay cannot
+// access the closure that owns it, so expose only these token-bound helpers.
+const historyReadFns = "window.__FFB_HISTORY_LIST=function(){return fetch('/__ffb__/history',{headers:{'x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "}}).then(function(r){if(!r.ok)throw new Error('History request failed: '+r.status);return r.json();});};" +
+  "window.__FFB_HISTORY_META=function(id){return fetch('/__ffb__/history/'+id+'.json',{headers:{'x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "}}).then(function(r){if(!r.ok)throw new Error('History request failed: '+r.status);return r.json();});};" +
+  "window.__FFB_HISTORY_BLOB=function(id){return fetch('/__ffb__/history/'+id+'.png',{headers:{'x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "}}).then(function(r){if(!r.ok)throw new Error('History request failed: '+r.status);return r.blob();});};";
 // Rebuilt per HTML response so a fresh reload reflects the latest saved settings.
 function bootScript() {
-  return "\n<script>window.__FFB_FILE=" + JSON.stringify(targetUrl.host) + ";" + bootAssignments() + saveFn + saveShotFn + sendFn + "</script>\n" +
+  return "\n<script>window.__FFB_FILE=" + JSON.stringify(targetUrl.host) + ";" + bootAssignments() + saveFn + saveShotFn + sendFn + archiveFn + historyReadFns + "</script>\n" +
     "<script>\n" + buildEngine() + "\n</script>\n";
 }
 
@@ -99,6 +144,64 @@ function bootScript() {
 const STRIP = new Set(["x-frame-options", "content-security-policy", "content-security-policy-report-only"]);
 
 const server = http.createServer(function (creq, cres) {
+  // History reads stay on the loopback-only proxy. The ID is validated before
+  // it can become part of a file path, and listBatches limits visibility to
+  // completion-marker-backed batches.
+  //
+  // Guard = the injected x-ffb-token ONLY (not isOwnProxyOrigin): browsers omit
+  // the Origin header on same-origin GET requests, so requiring Origin here would
+  // 403 the overlay's own history fetch/thumbnail/detail calls. The token is enough:
+  // it is injected only into the proxied page, the server is bound to loopback, and
+  // a cross-origin page cannot set a custom x-ffb-token header without a CORS
+  // preflight this proxy never grants. (POST routes keep the Origin check because
+  // browsers DO send Origin on same-origin POST.)
+  if (creq.method === "GET" && creq.url.startsWith("/__ffb__/history")) {
+    if (creq.headers["x-ffb-token"] !== FFB_SEND_TOKEN) {
+      sendJson(cres, 403, { error: "forbidden" });
+      return;
+    }
+    if (creq.url === "/__ffb__/history") {
+      history.listBatches().then((batches) => {
+        sendJson(cres, 200, batches.map(historySummary));
+      }).catch(() => {
+        sendJson(cres, 500, { error: "could not read history" });
+      });
+      return;
+    }
+
+    const match = creq.url.match(/^\/__ffb__\/history\/([^/]+)\.(json|png)$/);
+    if (!match || !history.isUuid(match[1])) {
+      sendJson(cres, 400, { error: "batch id must be a UUID" });
+      return;
+    }
+    const [, id, extension] = match;
+    markedHistoryBatch(id).then((batch) => {
+      if (!batch) {
+        sendJson(cres, 404, { error: "history batch not found" });
+        return;
+      }
+      if (extension === "json") {
+        sendJson(cres, 200, batch);
+        return;
+      }
+      const stream = createReadStream(historyPngPath(id));
+      stream.once("open", () => {
+        cres.writeHead(200, { "content-type": "image/png" });
+        stream.pipe(cres);
+      });
+      stream.once("error", (error) => {
+        if (cres.headersSent) {
+          cres.destroy(error);
+          return;
+        }
+        sendJson(cres, error?.code === "ENOENT" ? 404 : 500, { error: error?.code === "ENOENT" ? "history batch not found" : "could not read history" });
+      });
+    }).catch(() => {
+      sendJson(cres, 500, { error: "could not read history" });
+    });
+    return;
+  }
+
   // Feedback submissions stay on the loopback-only proxy. Check all request
   // guards before buffering/parsing a body, and never forward this route.
   if (creq.method === "POST" && creq.url === "/__ffb__/send") {
@@ -147,6 +250,59 @@ const server = http.createServer(function (creq, cres) {
         sendJson(cres, 200, { ok: true, count: await inbox.count() });
       } catch (error) {
         sendJson(cres, 500, { error: "could not store feedback" });
+      }
+    });
+    return;
+  }
+
+  // History uploads use a length-prefixed metadata frame followed by raw PNG.
+  // This stays on the loopback-only proxy and is never forwarded upstream.
+  if (creq.method === "POST" && creq.url === "/__ffb__/history") {
+    if (creq.headers["x-ffb-token"] !== FFB_SEND_TOKEN || !isOwnProxyOrigin(creq.headers, PORT)) {
+      sendJson(cres, 403, { error: "forbidden" });
+      return;
+    }
+    const contentType = String(creq.headers["content-type"] || "").split(";", 1)[0].trim().toLowerCase();
+    if (contentType !== "application/x-ffb-history" && contentType !== "application/octet-stream") {
+      sendJson(cres, 415, { error: "content-type must be application/x-ffb-history" });
+      return;
+    }
+    if (Number(creq.headers["content-length"] || 0) > MAX_HISTORY_BODY_BYTES) {
+      sendJson(cres, 413, { error: "request body too large" });
+      return;
+    }
+
+    let size = 0;
+    let tooLarge = false;
+    const chunks = [];
+    creq.on("data", function (chunk) {
+      if (tooLarge) return;
+      size += chunk.length;
+      if (size > MAX_HISTORY_BODY_BYTES) {
+        tooLarge = true;
+        sendJson(cres, 413, { error: "request body too large" });
+        return;
+      }
+      chunks.push(chunk);
+    });
+    creq.on("end", async function () {
+      if (tooLarge) return;
+      let batch;
+      try {
+        batch = parseHistoryBody(Buffer.concat(chunks));
+      } catch {
+        sendJson(cres, 400, { error: "invalid history framing" });
+        return;
+      }
+      if (!history.isUuid(batch.meta.id)) {
+        sendJson(cres, 400, { error: "batch id must be a UUID" });
+        return;
+      }
+      try {
+        await history.writeBatch(batch.meta, batch.png);
+        sendJson(cres, 200, { ok: true });
+      } catch (error) {
+        sendJson(cres, 500, { error: "could not store history" });
       }
     });
     return;
