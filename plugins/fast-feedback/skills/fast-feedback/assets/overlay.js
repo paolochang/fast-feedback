@@ -83,6 +83,11 @@
     '.__ffb_tab.sel{color:var(--__ffb_gold);border-color:var(--__ffb_gold)}',
     '.__ffb_panel .__ffb_list{overflow:auto;padding:10px;display:flex;flex-direction:column;gap:8px}',
     '.__ffb_empty{color:var(--__ffb_mut);font-size:12.5px;text-align:center;padding:14px 8px}',
+    // Loading indicator — visually distinct from the empty state (a spinner), so a
+    // tab switch to History reads as "loading", not a blank/empty panel.
+    '.__ffb_loading{display:flex;flex-direction:column;align-items:center;gap:10px;color:var(--__ffb_mut);font-size:12.5px;padding:28px 8px}',
+    '.__ffb_spin{width:22px;height:22px;border:2.5px solid var(--__ffb_line);border-top-color:var(--__ffb_gold);border-radius:50%;animation:__ffb_spin .7s linear infinite}',
+    '@keyframes __ffb_spin{to{transform:rotate(360deg)}}',
     '.__ffb_item{position:relative;border:1px solid var(--__ffb_line);border-radius:8px;padding:8px 8px 8px 10px;background:var(--__ffb_card)}',
     '.__ffb_item .__ffb_n{color:var(--__ffb_gold);font-weight:800;font-size:12px;margin-right:6px}',
     '.__ffb_item .__ffb_isel{color:var(--__ffb_mut);font-size:11px;word-break:break-all}',
@@ -757,11 +762,11 @@
       itemsEl.innerHTML = '<div class="__ffb_empty">History is available when Fast Feedback is served through the proxy.</div>';
       return;
     }
-    if (historyLoading) { itemsEl.innerHTML = '<div class="__ffb_empty">Loading history…</div>'; return; }
+    if (historyLoading) { itemsEl.innerHTML = '<div class="__ffb_loading"><div class="__ffb_spin"></div>Loading history…</div>'; return; }
     if (historyError) { itemsEl.innerHTML = '<div class="__ffb_empty">Could not load history right now.</div>'; return; }
     if (historyRows) { renderHistoryRows(); return; }
     historyLoading = true;
-    itemsEl.innerHTML = '<div class="__ffb_empty">Loading history…</div>';
+    itemsEl.innerHTML = '<div class="__ffb_loading"><div class="__ffb_spin"></div>Loading history…</div>';
     historyStore.list().then(function (rows) {
       historyRows = Array.isArray(rows) ? rows.slice().sort(function (a, b) { return (Date.parse(b.ts) || 0) - (Date.parse(a.ts) || 0); }) : [];
       historyLoading = false;
@@ -777,7 +782,9 @@
     activeListTab = tab;
     panel.querySelectorAll(".__ffb_tab").forEach(function (button) { button.classList.toggle("sel", button.getAttribute("data-tab") === tab); });
     historyDetailId = null;
-    if (tab === "history") historyRows = null;
+    // Reset both cache and error so switching to History always shows the loading
+    // spinner and refetches (a prior error must not persist as a stale message).
+    if (tab === "history") { historyRows = null; historyError = false; }
     renderList();
   }
 
