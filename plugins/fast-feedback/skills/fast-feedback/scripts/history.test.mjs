@@ -225,6 +225,27 @@ test("GET /__ffb__/history returns only done batch summaries, newest first", asy
   });
 });
 
+test("GET history routes succeed with the token but NO Origin header (browser same-origin GET)", async () => {
+  await withHistory(async (dir) => {
+    const proxy = await startProxy(dir);
+    try {
+      const batch = meta("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+      await writeBatch(batch, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      // Browsers omit Origin on same-origin GET, so the overlay's history fetches
+      // carry the token but no Origin. All three GET routes must accept that.
+      const noOrigin = { host: "localhost:" + proxy.port, "x-ffb-token": proxy.token };
+
+      assert.equal((await request({ port: proxy.port, method: "GET", path: "/__ffb__/history", headers: noOrigin })).status, 200);
+      assert.equal((await request({ port: proxy.port, method: "GET", path: "/__ffb__/history/" + batch.id + ".json", headers: noOrigin })).status, 200);
+      assert.equal((await request({ port: proxy.port, method: "GET", path: "/__ffb__/history/" + batch.id + ".png", headers: noOrigin })).status, 200);
+      // The token is still required — no token is still 403.
+      assert.equal((await request({ port: proxy.port, method: "GET", path: "/__ffb__/history", headers: { host: "localhost:" + proxy.port } })).status, 403);
+    } finally {
+      await proxy.close();
+    }
+  });
+});
+
 test("GET history detail returns a done batch's metadata and image", async () => {
   await withHistory(async (dir) => {
     const proxy = await startProxy(dir);

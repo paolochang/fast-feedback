@@ -147,8 +147,16 @@ const server = http.createServer(function (creq, cres) {
   // History reads stay on the loopback-only proxy. The ID is validated before
   // it can become part of a file path, and listBatches limits visibility to
   // completion-marker-backed batches.
+  //
+  // Guard = the injected x-ffb-token ONLY (not isOwnProxyOrigin): browsers omit
+  // the Origin header on same-origin GET requests, so requiring Origin here would
+  // 403 the overlay's own history fetch/thumbnail/detail calls. The token is enough:
+  // it is injected only into the proxied page, the server is bound to loopback, and
+  // a cross-origin page cannot set a custom x-ffb-token header without a CORS
+  // preflight this proxy never grants. (POST routes keep the Origin check because
+  // browsers DO send Origin on same-origin POST.)
   if (creq.method === "GET" && creq.url.startsWith("/__ffb__/history")) {
-    if (creq.headers["x-ffb-token"] !== FFB_SEND_TOKEN || !isOwnProxyOrigin(creq.headers, PORT)) {
+    if (creq.headers["x-ffb-token"] !== FFB_SEND_TOKEN) {
       sendJson(cres, 403, { error: "forbidden" });
       return;
     }
