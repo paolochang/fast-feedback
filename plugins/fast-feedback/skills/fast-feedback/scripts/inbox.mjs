@@ -129,6 +129,7 @@ export async function withMirrorLock(dir, run) {
       await new Promise((resolve) => setTimeout(resolve, 15));
     }
   }
+  if (!acquired) return;
   try {
     return await run();
   } finally {
@@ -213,17 +214,21 @@ export async function readAndClear({ remove = rm } = {}) {
     }
   }));
   const readableEntries = entries.filter(Boolean);
-  await Promise.all(readableEntries.map(async ({ claimedName }) => {
+  const removed = await Promise.all(readableEntries.map(async (entry) => {
     try {
-      await remove(join(pendingDir, claimedName));
+      await remove(join(pendingDir, entry.claimedName));
+      return entry;
     } catch (error) {
+      if (error?.code === "ENOENT") return entry;
       console.error(error);
+      return null;
     }
   }));
+  const deliveredEntries = removed.filter(Boolean);
   try {
     await regenerateMirrors(dir, pendingDir);
   } catch (error) {
     console.error(error);
   }
-  return readableEntries.map(({ item }) => item);
+  return deliveredEntries.map(({ item }) => item);
 }

@@ -257,9 +257,10 @@ test("serialized mirror regeneration publishes the current spool after an interl
   });
 });
 
-test("regenerateMirrors proceeds when the mirror lock cannot be acquired", async () => {
+test("regenerateMirrors skips when the mirror lock cannot be acquired", async () => {
   await withInbox(async (dir) => {
     await appendItems([]);
+    await rm(join(dir, "inbox.jsonl"));
     const lockDir = join(dir, ".mirror.lock");
     await mkdir(lockDir);
     try {
@@ -267,6 +268,7 @@ test("regenerateMirrors proceeds when the mirror lock cannot be acquired", async
         regenerateMirrors(dir, join(dir, "pending")),
         new Promise((_, reject) => setTimeout(() => reject(new Error("mirror regeneration timed out")), 3000)),
       ]);
+      await assert.rejects(readFile(join(dir, "inbox.jsonl"), "utf8"), { code: "ENOENT" });
     } finally {
       await rmdir(lockDir);
     }
@@ -300,15 +302,17 @@ test("readAndClear quarantines unreadable claims and returns valid items", async
   });
 });
 
-test("readAndClear returns all items when one claimed file cannot be deleted", async () => {
+test("readAndClear returns a failed deletion once after its claim expires", async () => {
   await withInbox(async (dir) => {
     const items = [{ comment: "first" }, { comment: "second" }];
     let failed = false;
+    let failedComment;
     await appendItems(items);
 
     const returned = await readAndClear({ remove: async (path) => {
       if (!failed) {
         failed = true;
+        failedComment = JSON.parse(await readFile(path, "utf8")).comment;
         const error = new Error("locked");
         error.code = "EPERM";
         throw error;
@@ -317,8 +321,13 @@ test("readAndClear returns all items when one claimed file cannot be deleted", a
     } });
 
     assert.equal(failed, true);
-    assert.deepEqual(returned.map(({ comment }) => comment).sort(), ["first", "second"]);
-    assert.equal((await readdir(join(dir, "pending"))).filter((name) => name.endsWith(".claimed")).length, 1);
+    assert.deepEqual(returned.map(({ comment }) => comment), items.map(({ comment }) => comment).filter((comment) => comment !== failedComment));
+    const claimedName = (await readdir(join(dir, "pending"))).find((name) => name.endsWith(".claimed"));
+    assert.ok(claimedName);
+    await utimes(join(dir, "pending", claimedName), new Date(Date.now() - 120000), new Date(Date.now() - 120000));
+
+    assert.deepEqual((await readAndClear()).map(({ comment }) => comment), [failedComment]);
+    assert.deepEqual(await readAndClear(), []);
   });
 });
 
