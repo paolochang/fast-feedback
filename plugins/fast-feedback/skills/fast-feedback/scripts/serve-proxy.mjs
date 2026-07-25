@@ -29,6 +29,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bootAssignments, applyUpdate, saveScreenshot } from "./settings.mjs";
 import * as inbox from "./inbox.mjs";
+import { isLoopbackHost, isOwnProxyOrigin } from "./proxy-guards.mjs";
 
 const argv = process.argv.slice(2);
 function opt(name, def) { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : def; }
@@ -39,6 +40,10 @@ if (!target) {
   process.exit(1);
 }
 const targetUrl = new URL(target);
+if (!argv.includes("--allow-remote") && !isLoopbackHost(targetUrl.hostname)) {
+  console.error("Refusing non-loopback --target; pass --allow-remote only for a target you trust.");
+  process.exit(1);
+}
 if (targetUrl.protocol !== "http:") {
   console.error("Only http:// dev servers are supported for now (an https dev server would need a local cert).\n" +
     "Most dev servers run on http://localhost — start yours on http, or run it without HTTPS for the review.");
@@ -56,13 +61,6 @@ export const FFB_SEND_TOKEN = randomBytes(24).toString("hex");
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, { "content-type": "application/json" });
   response.end(JSON.stringify(payload));
-}
-
-function isOwnProxyOrigin(headers) {
-  const host = String(headers.host || "").toLowerCase();
-  const origin = String(headers.origin || "").toLowerCase();
-  const proxyHosts = new Set(["localhost:" + PORT, "127.0.0.1:" + PORT]);
-  return proxyHosts.has(host) && proxyHosts.has(origin.replace(/^http:\/\//, ""));
 }
 
 // Build the overlay bundle exactly like the other modes: vendored html2canvas
@@ -104,7 +102,7 @@ const server = http.createServer(function (creq, cres) {
   // Feedback submissions stay on the loopback-only proxy. Check all request
   // guards before buffering/parsing a body, and never forward this route.
   if (creq.method === "POST" && creq.url === "/__ffb__/send") {
-    if (creq.headers["x-ffb-token"] !== FFB_SEND_TOKEN || !isOwnProxyOrigin(creq.headers)) {
+    if (creq.headers["x-ffb-token"] !== FFB_SEND_TOKEN || !isOwnProxyOrigin(creq.headers, PORT)) {
       sendJson(cres, 403, { error: "forbidden" });
       return;
     }

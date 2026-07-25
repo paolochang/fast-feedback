@@ -216,7 +216,7 @@ mode changes persist via `localStorage` for that page.
 
 Hotkeys (defaults — all rebindable in ⚙): **Ctrl+.** show/hide · **Ctrl+/**
 annotate (**Esc** disarms) · **Ctrl+[** list · **Ctrl+'** copy · **Ctrl+;**
-screenshot · in a form **Ctrl+Enter** submit / **Esc** cancel.
+screenshot · **Ctrl+Backslash** Send · in a form **Ctrl+Enter** submit / **Esc** cancel.
 
 ## Feedback format you will receive
 

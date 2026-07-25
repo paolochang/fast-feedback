@@ -87,8 +87,25 @@ function methodNotFound(id) {
   return { jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found" } };
 }
 
+function invalidRequest(id) {
+  return { jsonrpc: "2.0", id, error: { code: -32600, message: "Invalid Request" } };
+}
+
+function internalError(id) {
+  return { jsonrpc: "2.0", id, error: { code: -32603, message: "Internal error" } };
+}
+
+function isValidRequest(request) {
+  return request !== null
+    && typeof request === "object"
+    && !Array.isArray(request)
+    && request.jsonrpc === "2.0"
+    && typeof request.method === "string";
+}
+
 export async function handleRequest(request) {
-  if (request?.id === undefined || request?.method?.startsWith("notifications/")) return null;
+  if (!isValidRequest(request)) return invalidRequest(request?.id ?? null);
+  if (request.id === undefined || request.method.startsWith("notifications/")) return null;
 
   switch (request?.method) {
     case "ping":
@@ -113,15 +130,15 @@ export async function handleRequest(request) {
   }
 }
 
-async function serveStdio() {
-  const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
+export async function serveStdio({ input: source = process.stdin, output = process.stdout, dispatch = handleRequest } = {}) {
+  const input = createInterface({ input: source, crlfDelay: Infinity });
   for await (const line of input) {
     if (!line.trim()) continue;
     let request;
     try {
       request = JSON.parse(line);
     } catch {
-      process.stdout.write(JSON.stringify({
+      output.write(JSON.stringify({
         jsonrpc: "2.0",
         id: null,
         error: { code: -32700, message: "Parse error" },
@@ -129,8 +146,11 @@ async function serveStdio() {
       continue;
     }
 
-    handleRequest(request).then((reply) => {
-      if (reply) process.stdout.write(JSON.stringify(reply) + "\n");
+    const hasId = request !== null && typeof request === "object" && !Array.isArray(request) && Object.hasOwn(request, "id");
+    Promise.resolve().then(() => dispatch(request)).then((reply) => {
+      if (reply) output.write(JSON.stringify(reply) + "\n");
+    }).catch(() => {
+      if (hasId) output.write(JSON.stringify(internalError(request.id)) + "\n");
     });
   }
 }

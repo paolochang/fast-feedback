@@ -59,8 +59,16 @@ async function readPending(pendingDir) {
 }
 
 function filenameForItem(item) {
-  if (typeof item?.id !== "string" || !item.id) return randomUUID() + ".json";
-  return item.id.replace(/[^A-Za-z0-9._-]/g, "_") + ".json";
+  return isUuid(item?.id) ? item.id + ".json" : randomUUID() + ".json";
+}
+
+function isUuid(value) {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function normalizeItem(item) {
+  if (!item || typeof item !== "object" || Array.isArray(item) || isUuid(item.id)) return item;
+  return { ...item, id: randomUUID() };
 }
 
 function buildMarkdown(items) {
@@ -95,7 +103,8 @@ export async function appendItems(items) {
   if (!Array.isArray(items)) throw new TypeError("items must be an array");
 
   const { dir, pendingDir } = await ensureInbox();
-  await Promise.all(items.map((item) => writeAtomically(
+  const normalizedItems = items.map(normalizeItem);
+  await Promise.all(normalizedItems.map((item) => writeAtomically(
     join(pendingDir, filenameForItem(item)),
     JSON.stringify(item),
   )));
@@ -115,22 +124,27 @@ export async function count() {
 export async function readAndClear() {
   const { dir, pendingDir } = await ensureInbox();
   const files = await pendingFiles(pendingDir);
-  const entries = await Promise.all(files.map(async ({ name }) => {
+  const claims = await Promise.all(files.map(async ({ name }) => {
+    const claimedName = name + "." + randomUUID() + ".claimed";
     try {
-      return { name, item: JSON.parse(await readFile(join(pendingDir, name), "utf8")) };
+      await rename(join(pendingDir, name), join(pendingDir, claimedName));
+      return { claimedName };
     } catch (error) {
       if (error?.code === "ENOENT") return null;
       throw error;
     }
   }));
-  const items = entries.filter(Boolean);
-  await Promise.all(items.map(async ({ name }) => {
+  const entries = await Promise.all(claims.filter(Boolean).map(async ({ claimedName }) => ({
+    claimedName,
+    item: JSON.parse(await readFile(join(pendingDir, claimedName), "utf8")),
+  })));
+  await Promise.all(entries.map(async ({ claimedName }) => {
     try {
-      await rm(join(pendingDir, name));
+      await rm(join(pendingDir, claimedName));
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
     }
   }));
   await regenerateMirrors(dir, pendingDir);
-  return items.map(({ item }) => item);
+  return entries.map(({ item }) => item);
 }

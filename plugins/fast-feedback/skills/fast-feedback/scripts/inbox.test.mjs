@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -34,10 +34,16 @@ test("appendItems atomically spools every item and regenerates both mirrors", as
     const spooled = await Promise.all(
       pending.map(async (name) => JSON.parse(await readFile(join(dir, "pending", name), "utf8"))),
     );
-    assert.deepEqual(spooled.sort((a, b) => a.selector.localeCompare(b.selector)), items.sort((a, b) => a.selector.localeCompare(b.selector)));
+    assert.deepEqual(
+      spooled.map(({ id, ...item }) => item).sort((a, b) => a.selector.localeCompare(b.selector)),
+      items.sort((a, b) => a.selector.localeCompare(b.selector)),
+    );
 
     const jsonl = await readFile(join(dir, "inbox.jsonl"), "utf8");
-    assert.deepEqual(jsonl.trim().split("\n").map((line) => JSON.parse(line)).sort((a, b) => a.selector.localeCompare(b.selector)), items.sort((a, b) => a.selector.localeCompare(b.selector)));
+    assert.deepEqual(
+      jsonl.trim().split("\n").map((line) => JSON.parse(line)).map(({ id, ...item }) => item).sort((a, b) => a.selector.localeCompare(b.selector)),
+      items.sort((a, b) => a.selector.localeCompare(b.selector)),
+    );
 
     const markdown = await readFile(join(dir, "inbox.md"), "utf8");
     assert.match(markdown, /^# Fast feedback inbox/m);
@@ -53,10 +59,10 @@ test("peek and count retain pending items until readAndClear consumes them", asy
     await appendItems(items);
 
     assert.equal(await count(), 1);
-    assert.deepEqual(await peek(), items);
+    assert.deepEqual((await peek()).map(({ id, ...item }) => item), items);
     assert.equal(await count(), 1);
 
-    assert.deepEqual(await readAndClear(), items);
+    assert.deepEqual((await readAndClear()).map(({ id, ...item }) => item), items);
     assert.equal(await count(), 0);
     assert.deepEqual(await peek(), []);
     assert.deepEqual(await readAndClear(), []);
@@ -71,46 +77,69 @@ test("an item appended after a clear remains for the next clear", async () => {
     const second = { selector: "#second", comment: "Second item" };
     await appendItems([first]);
 
-    assert.deepEqual(await readAndClear(), [first]);
+    assert.deepEqual((await readAndClear()).map(({ id, ...item }) => item), [first]);
     await appendItems([second]);
 
-    assert.deepEqual(await readAndClear(), [second]);
+    assert.deepEqual((await readAndClear()).map(({ id, ...item }) => item), [second]);
     assert.deepEqual(await readAndClear(), []);
   });
 });
 
-test("re-sending an item id overwrites its pending entry with the latest content", async () => {
+test("UUID item ids name and update their own pending entry", async () => {
   await withInbox(async (dir) => {
-    await appendItems([{ id: "annotation-1", comment: "original" }]);
-    await appendItems([{ id: "annotation-1", comment: "updated" }]);
-    await appendItems([{ id: "annotation-2", comment: "separate" }]);
+    const firstId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const secondId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    await appendItems([{ id: firstId, comment: "original" }]);
+    await appendItems([{ id: firstId, comment: "updated" }]);
+    await appendItems([{ id: secondId, comment: "separate" }]);
 
-    assert.deepEqual((await readdir(join(dir, "pending"))).sort(), ["annotation-1.json", "annotation-2.json"]);
+    assert.deepEqual((await readdir(join(dir, "pending"))).sort(), [firstId + ".json", secondId + ".json"]);
     assert.deepEqual(await readAndClear(), [
-      { id: "annotation-1", comment: "updated" },
-      { id: "annotation-2", comment: "separate" },
+      { id: firstId, comment: "updated" },
+      { id: secondId, comment: "separate" },
     ]);
   });
 });
 
-test("unsafe item ids are sanitized without escaping the pending directory", async () => {
+test("non-UUID ids are replaced with distinct UUIDs before spooling", async () => {
   await withInbox(async (dir) => {
-    const item = { id: "a/b", comment: "contained" };
+    await appendItems([
+      { id: "a/b", comment: "slash" },
+      { id: "a_b", comment: "underscore" },
+    ]);
 
-    await appendItems([item]);
-
-    assert.deepEqual(await readdir(join(dir, "pending")), ["a_b.json"]);
-    await assert.rejects(readFile(join(dir, "a.json"), "utf8"), { code: "ENOENT" });
-    assert.deepEqual(await readAndClear(), [item]);
+    const names = await readdir(join(dir, "pending"));
+    assert.equal(names.length, 2);
+    assert.ok(names.every((name) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/i.test(name)));
+    assert.ok(names.every((name) => !name.includes("a_b")));
+    assert.deepEqual(
+      (await readAndClear()).map(({ comment, id }) => ({ comment, validId: /^[0-9a-f-]{36}$/i.test(id) })).sort((left, right) => left.comment.localeCompare(right.comment)),
+      [{ comment: "slash", validId: true }, { comment: "underscore", validId: true }],
+    );
   });
 });
 
-test("concurrent consumers tolerate files removed by the other consumer", async () => {
+test("peek and count ignore files claimed by another consumer", async () => {
+  await withInbox(async (dir) => {
+    await appendItems([]);
+    const claimed = join(dir, "pending", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.json.claimed");
+    await writeFile(claimed, JSON.stringify({ comment: "already claimed" }), "utf8");
+
+    assert.equal(await count(), 0);
+    assert.deepEqual(await peek(), []);
+  });
+});
+
+test("concurrent consumers exclusively claim every pending item", async () => {
   await withInbox(async () => {
-    await appendItems([{ id: "racing-item", comment: "race" }]);
+    const items = Array.from({ length: 12 }, (_, index) => ({ comment: "race " + index }));
+    await appendItems(items);
 
-    const results = await Promise.allSettled([readAndClear(), readAndClear()]);
+    const results = await Promise.all([readAndClear(), readAndClear()]);
+    const returned = results.flat();
 
-    assert.ok(results.every(({ status }) => status === "fulfilled"));
+    assert.equal(returned.length, items.length);
+    assert.equal(new Set(returned.map(({ id }) => id)).size, items.length);
+    assert.deepEqual(returned.map(({ comment }) => comment).sort(), items.map(({ comment }) => comment).sort());
   });
 });

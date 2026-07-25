@@ -3,11 +3,12 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { appendItems } from "../scripts/inbox.mjs";
-import { handleRequest, toolDefinitions, waitForFeedback } from "./server.mjs";
+import { handleRequest, serveStdio, toolDefinitions, waitForFeedback } from "./server.mjs";
 
 async function withInbox(run) {
   const inbox = await mkdtemp(join(tmpdir(), "ffb-mcp-"));
@@ -46,12 +47,12 @@ test("pull clears feedback while peek and status preserve it", { concurrency: fa
 
     assert.equal((await toolCall("ffb_status")).result.content[0].text, "2");
     assert.deepEqual(
-      JSON.parse((await toolCall("ffb_peek")).result.content[0].text).sort((left, right) => left.n - right.n),
+      JSON.parse((await toolCall("ffb_peek")).result.content[0].text).map(({ id, ...item }) => item).sort((left, right) => left.n - right.n),
       items,
     );
     assert.equal((await toolCall("ffb_status")).result.content[0].text, "2");
     assert.deepEqual(
-      JSON.parse((await toolCall("ffb_pull")).result.content[0].text).sort((left, right) => left.n - right.n),
+      JSON.parse((await toolCall("ffb_pull")).result.content[0].text).map(({ id, ...item }) => item).sort((left, right) => left.n - right.n),
       items,
     );
     assert.equal((await toolCall("ffb_status")).result.content[0].text, "0");
@@ -75,7 +76,10 @@ test("wait returns new feedback promptly and reports a short timeout", { concurr
     setTimeout(() => appendItems([{ comment: "arrived" }]), 50);
     const result = await waiting;
     assert.ok(Date.now() - started < 1_000);
-    assert.deepEqual(JSON.parse(result.result.content[0].text), [{ comment: "arrived" }]);
+    assert.deepEqual(
+      JSON.parse(result.result.content[0].text).map(({ id, ...item }) => item),
+      [{ comment: "arrived" }],
+    );
   });
 });
 
@@ -88,6 +92,38 @@ test("unknown methods error and notifications do not reply", async () => {
   const zeroId = await handleRequest({ jsonrpc: "2.0", id: 0, method: "does/not/exist" });
   assert.equal(zeroId.id, 0);
   assert.deepEqual(zeroId.error, { code: -32601, message: "Method not found" });
+});
+
+test("invalid JSON-RPC envelopes return Invalid Request before notification suppression", async () => {
+  for (const request of [{}, null, { jsonrpc: "1.0", id: 1, method: "ping" }, { jsonrpc: "2.0", id: 1, method: 5 }]) {
+    const reply = await handleRequest(request);
+    assert.deepEqual(reply.error, { code: -32600, message: "Invalid Request" });
+  }
+  assert.equal((await handleRequest({})).id, null);
+  assert.equal((await handleRequest(null)).id, null);
+  assert.equal((await handleRequest({ jsonrpc: "2.0", id: 1, method: 5 })).id, 1);
+  assert.equal(await handleRequest({ jsonrpc: "2.0", method: "ping" }), null);
+  assert.equal(await handleRequest({ jsonrpc: "2.0", id: 2, method: "notifications/initialized" }), null);
+});
+
+test("stdio returns an internal error if dispatch rejects for a request with an id", async () => {
+  const input = new PassThrough();
+  let stdout = "";
+  const serving = serveStdio({
+    input,
+    output: { write: (chunk) => { stdout += chunk; } },
+    dispatch: () => { throw new Error("dispatch failed"); },
+  });
+
+  input.end(JSON.stringify({ jsonrpc: "2.0", id: "boom", method: "ping" }) + "\n");
+  await serving;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(JSON.parse(stdout), {
+    jsonrpc: "2.0",
+    id: "boom",
+    error: { code: -32603, message: "Internal error" },
+  });
 });
 
 test("ping returns an empty MCP result", async () => {
