@@ -35,6 +35,8 @@ test("initialize and tools/list expose the four schemas", async () => {
   assert.equal(initialized.result.capabilities.tools instanceof Object, true);
   assert.equal(typeof initialized.result.protocolVersion, "string");
   assert.equal(initialized.result.serverInfo.version, plugin.version);
+  // Non-tautological: must be a well-formed semver string, never undefined/number (F2 guard).
+  assert.match(initialized.result.serverInfo.version, /^\d+\.\d+\.\d+$/);
 
   const listed = await handleRequest({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
   assert.deepEqual(listed.result.tools, toolDefinitions);

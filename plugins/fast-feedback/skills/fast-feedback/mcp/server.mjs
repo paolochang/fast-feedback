@@ -12,7 +12,8 @@ const POLL_INTERVAL_MS = 500;
 const FALLBACK_SERVER_VERSION = "0.0.0";
 const SERVER_VERSION = (() => {
   try {
-    return JSON.parse(readFileSync(new URL("../../../.claude-plugin/plugin.json", import.meta.url), "utf8")).version;
+    const v = JSON.parse(readFileSync(new URL("../../../.claude-plugin/plugin.json", import.meta.url), "utf8")).version;
+    return typeof v === "string" ? v : FALLBACK_SERVER_VERSION;
   } catch {
     return FALLBACK_SERVER_VERSION;
   }
