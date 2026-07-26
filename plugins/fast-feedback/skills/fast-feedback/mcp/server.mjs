@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
@@ -8,6 +9,14 @@ const PROTOCOL_VERSION = "2024-11-05";
 const DEFAULT_WAIT_TIMEOUT_MS = 100_000;
 const MAX_WAIT_TIMEOUT_MS = 110_000;
 const POLL_INTERVAL_MS = 500;
+const FALLBACK_SERVER_VERSION = "0.0.0";
+const SERVER_VERSION = (() => {
+  try {
+    return JSON.parse(readFileSync(new URL("../../../.claude-plugin/plugin.json", import.meta.url), "utf8")).version;
+  } catch {
+    return FALLBACK_SERVER_VERSION;
+  }
+})();
 
 export const toolDefinitions = [
   {
@@ -114,7 +123,7 @@ export async function handleRequest(request) {
       return response(request.id, {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: {} },
-        serverInfo: { name: "fast-feedback", version: "1.0.0" },
+        serverInfo: { name: "fast-feedback", version: SERVER_VERSION },
       });
     case "tools/list":
       return response(request.id, { tools: toolDefinitions });

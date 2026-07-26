@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -29,10 +29,12 @@ function toolCall(name) {
 
 test("initialize and tools/list expose the four schemas", async () => {
   const initialized = await handleRequest({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+  const plugin = JSON.parse(await readFile(new URL("../../../.claude-plugin/plugin.json", import.meta.url), "utf8"));
   assert.equal(initialized.jsonrpc, "2.0");
   assert.equal(initialized.id, 1);
   assert.equal(initialized.result.capabilities.tools instanceof Object, true);
   assert.equal(typeof initialized.result.protocolVersion, "string");
+  assert.equal(initialized.result.serverInfo.version, plugin.version);
 
   const listed = await handleRequest({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
   assert.deepEqual(listed.result.tools, toolDefinitions);
