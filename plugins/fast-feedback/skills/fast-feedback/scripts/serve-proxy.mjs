@@ -110,11 +110,11 @@ server.on("upgrade", function (creq, csocket, head) {
   csocket.on("error", function () { psocket.destroy(); });
 });
 
-server.listen(PORT, "127.0.0.1", async function () {
-  // Await the version check before advertising the URL (bounded to ~3s by the
-  // wall-clock timeout, fail-silent) so the badge is present on the first paint
-  // once the user opens the printed URL — mirrors serve-static.
-  await ensureVersionChecked();
+// Run the version check before opening the port (bounded to ~3s by the
+// wall-clock timeout, fail-silent) so no request — including a stale browser
+// tab from a prior run — can be served before the badge state is resolved.
+await ensureVersionChecked();
+server.listen(PORT, "127.0.0.1", function () {
   console.log("fast-feedback proxy running:");
   console.log("  http://localhost:" + PORT + "  →  " + target);
   console.log("");
