@@ -151,11 +151,16 @@ const server = http.createServer((creq, cres) => {
 
 server.listen(PORT, "127.0.0.1", () => {
   const url = "http://127.0.0.1:" + PORT;
+  // Open/advertise the document by its filename, not "/", so location.href
+  // carries the name. overlay.js serializes location.href into each Send item,
+  // so this is what lets the receiving agent attribute file-mode feedback to
+  // the source file (the "/" default document still serves it too).
+  const pageUrl = url + "/" + encodeURIComponent(documentName);
   const inbox = process.env.FFB_INBOX ? resolve(process.env.FFB_INBOX) : join(process.cwd(), ".ffb");
   console.log("fast-feedback static server running:");
-  console.log("  " + url + "  →  " + documentPath);
+  console.log("  " + pageUrl + "  →  " + documentPath);
   console.log("  inbox: " + inbox);
   console.log("  settings project/cwd: " + (process.env.FFB_PROJECT || process.cwd()));
-  console.log("Open " + url + " in your browser. Ctrl+. toggles · overlay hot-read on.");
-  if (!process.env.FFB_NO_OPEN) openInBrowser(url);
+  console.log("Open " + pageUrl + " in your browser. Ctrl+. toggles · overlay hot-read on.");
+  if (!process.env.FFB_NO_OPEN) openInBrowser(pageUrl);
 });

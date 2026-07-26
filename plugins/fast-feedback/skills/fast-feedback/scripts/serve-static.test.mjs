@@ -50,7 +50,9 @@ async function startStatic(file, inbox, { portBeforeFile = false } = {}) {
       reject(new Error("static server exited early (" + code + "): " + output));
     });
     const ready = () => {
-      if (!output.includes("fast-feedback static server running")) return;
+      // Wait for the LAST banner line (server is already listening) so the full
+      // banner — including the advertised page URL — is present in output().
+      if (!output.includes("overlay hot-read on")) return;
       clearTimeout(timer);
       resolve();
     };
@@ -267,6 +269,20 @@ test("labels an injected linked page with its own filename", async () => {
       const response = await request({ port: server.port, path: "/page2.html" });
       assert.equal(response.status, 200);
       assert.match(response.body, /window\.__FFB_FILE="page2\.html"/);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("advertises the document's filename URL so Send carries the filename", async () => {
+  await withStatic({ "mockup.html": "<body>page</body>" }, async ({ file, inbox }) => {
+    const server = await startStatic(file, inbox);
+    try {
+      assert.match(server.output(), /http:\/\/127\.0\.0\.1:\d+\/mockup\.html/);
+      const res = await request({ port: server.port, path: "/mockup.html" });
+      assert.equal(res.status, 200);
+      assert.match(res.body, /window\.__FFB_FILE="mockup\.html"/);
     } finally {
       await server.close();
     }
