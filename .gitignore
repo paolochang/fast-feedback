@@ -4,7 +4,6 @@ Thumbs.db
 *.swp
 
 # fast-feedback runtime output (generated when the tool is used)
-*.review.html
 fast-feedback.snippet.js
 fast-feedback.bookmarklet.txt
 feedback-screenshot.png

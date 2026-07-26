@@ -5,14 +5,17 @@ import http from "node:http";
 import { spawn } from "node:child_process";
 import { createReadStream, readFileSync, statSync } from "node:fs";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
-import { FFB_SEND_TOKEN, STRIP, handleFfbRoute, injectBoot, renderBoot } from "./serve-core.mjs";
-
-export { FFB_SEND_TOKEN, STRIP };
+import { handleFfbRoute, injectBoot, renderBoot } from "./serve-core.mjs";
 
 const argv = process.argv.slice(2);
-const input = argv[0];
 const portIndex = argv.indexOf("--port");
-const PORT = parseInt(portIndex >= 0 ? argv[portIndex + 1] : "5000", 10);
+const input = argv.find((arg, index) => (portIndex < 0 || (index !== portIndex && index !== portIndex + 1)) && !arg.startsWith("-"));
+const PORT = Number(portIndex >= 0 ? argv[portIndex + 1] : "5000");
+
+if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
+  console.error("Port must be an integer between 1 and 65535");
+  process.exit(1);
+}
 
 if (!input) {
   console.error("Usage: node serve-static.mjs <path> [--port 5000]");
@@ -36,6 +39,7 @@ if (!inputStats.isFile()) {
 }
 
 const root = dirname(documentPath);
+const rootBoundary = root.endsWith(sep) ? root : root + sep;
 const documentName = basename(documentPath);
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
@@ -79,7 +83,11 @@ function renderHtml(path) {
 function openInBrowser(url) {
   const [command, args] = process.platform === "win32" ? ["cmd", ["/c", "start", "", url]] :
     process.platform === "darwin" ? ["open", [url]] : ["xdg-open", [url]];
-  try { spawn(command, args, { detached: true, stdio: "ignore" }).unref(); } catch {}
+  try {
+    const child = spawn(command, args, { detached: true, stdio: "ignore" });
+    child.on("error", () => {});
+    child.unref();
+  } catch {}
 }
 
 const server = http.createServer((creq, cres) => {
@@ -94,15 +102,20 @@ const server = http.createServer((creq, cres) => {
     cres.end("Bad Request");
     return;
   }
+  if (urlPath.includes("\0")) {
+    cres.writeHead(400);
+    cres.end("Bad Request");
+    return;
+  }
 
   const path = resolve(join(root, urlPath === "/" ? documentName : urlPath));
-  if (path !== root && !path.startsWith(root + sep)) {
+  if (path !== root && !path.startsWith(rootBoundary)) {
     cres.writeHead(403);
     cres.end("Forbidden");
     return;
   }
 
-  if ([".html", ".htm"].includes(extname(path).toLowerCase())) {
+  if (path === documentPath || [".html", ".htm"].includes(extname(path).toLowerCase())) {
     try {
       const html = renderHtml(path);
       cres.writeHead(200, {

@@ -63,6 +63,7 @@ overlay runs *same-origin* with the app: full DOM access, no iframe.
    static server and MCP server share `<project-root>/.ffb/`; if they must use
    different working directories, set `FFB_INBOX` to the same absolute inbox
    path for both.
+   The server serves the mockup's own directory, so assets should be at or below it; `../parent` assets will not resolve.
 3. **Tell the user to annotate** (see *Annotating* below), then use **Send to
    AI** to deliver new annotations to the MCP server. Settings write-back and
    saving screenshots to a folder work in served file mode too.

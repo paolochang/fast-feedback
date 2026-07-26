@@ -10,8 +10,8 @@ import { isOwnProxyOrigin } from "./proxy-guards.mjs";
 const MAX_SEND_BODY_BYTES = 256 * 1024;
 const MAX_HISTORY_BODY_BYTES = 12 * 1024 * 1024;
 
-// TASK-02 can inject this into window.__FFB_SEND when it builds the client boot
-// script. It is minted once for each proxy process and never logged.
+// Minted once per server process and never logged; the injected boot script
+// embeds it and every /__ffb__ POST is checked against it.
 export const FFB_SEND_TOKEN = randomBytes(24).toString("hex");
 
 function sendJson(response, statusCode, payload) {

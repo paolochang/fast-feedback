@@ -33,9 +33,10 @@ async function unusedPort() {
   return port;
 }
 
-async function startStatic(file, inbox) {
+async function startStatic(file, inbox, { portBeforeFile = false } = {}) {
   const port = await unusedPort();
-  const child = spawn(process.execPath, [scriptPath, file, "--port", String(port)], {
+  const args = portBeforeFile ? ["--port", String(port), file] : [file, "--port", String(port)];
+  const child = spawn(process.execPath, [scriptPath, ...args], {
     env: { ...process.env, FFB_INBOX: inbox, FFB_NO_OPEN: "1" },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -66,12 +67,12 @@ async function startStatic(file, inbox) {
   };
 }
 
-async function withStatic(files, run) {
+async function withStatic(files, run, documentName = "mockup.html") {
   const dir = await mkdtemp(join(tmpdir(), "ffb-static-"));
   const inbox = join(dir, "inbox");
   try {
     for (const [name, body] of Object.entries(files)) await writeFile(join(dir, name), body);
-    await run({ dir, inbox, file: join(dir, "mockup.html") });
+    await run({ dir, inbox, file: join(dir, documentName) });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -166,6 +167,32 @@ test("returns 404 for missing static files", async () => {
   });
 });
 
+test("rejects null-byte asset paths without taking down the server", async () => {
+  await withStatic({ "mockup.html": "<body>page</body>" }, async ({ file, inbox }) => {
+    const server = await startStatic(file, inbox);
+    try {
+      assert.equal((await request({ port: server.port, path: "/x%00bar.css" })).status, 400);
+      assert.equal((await request({ port: server.port, path: "/" })).status, 200);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("injects the boot into an extensionless selected document", async () => {
+  await withStatic({ mockup: "<html><body>page</body></html>" }, async ({ file, inbox }) => {
+    const server = await startStatic(file, inbox);
+    try {
+      const response = await request({ port: server.port });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers["content-type"], "text/html; charset=utf-8");
+      assert.match(response.body, /window\.__FFB_FILE="mockup"/);
+    } finally {
+      await server.close();
+    }
+  }, "mockup");
+});
+
 test("POST /__ffb__/send accepts the injected token and loopback origin", async () => {
   await withStatic({ "mockup.html": "<body>page</body>" }, async ({ file, inbox }) => {
     const server = await startStatic(file, inbox);
@@ -210,4 +237,25 @@ test("rejects directory and nonexistent inputs with clear non-zero CLI errors", 
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("rejects missing and non-numeric --port values with clear CLI errors", async () => {
+  const missing = await runCli(["--port"]);
+  assert.notEqual(missing.code, 0);
+  assert.match(missing.output, /port must be an integer between 1 and 65535/i);
+
+  const nonNumeric = await runCli(["--port", "not-a-port"]);
+  assert.notEqual(nonNumeric.code, 0);
+  assert.match(nonNumeric.output, /port must be an integer between 1 and 65535/i);
+});
+
+test("accepts --port before the selected document", async () => {
+  await withStatic({ "mockup.html": "<body>page</body>" }, async ({ file, inbox }) => {
+    const server = await startStatic(file, inbox, { portBeforeFile: true });
+    try {
+      assert.equal((await request({ port: server.port })).status, 200);
+    } finally {
+      await server.close();
+    }
+  });
 });
