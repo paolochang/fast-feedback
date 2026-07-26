@@ -26,8 +26,8 @@ finds the right component even when class names are hashed or utility-based.
 /plugin install fast-feedback@fast-feedback
 ```
 
-Because it's installed from a marketplace (this git repo), you get updates: when a
-new version is pushed here, update it from the `/plugin` menu — no re-copying.
+Because it's installed from a marketplace (this git repo), you get updates when a
+new version is pushed here — no re-copying.
 
 Prefer to just copy it? Clone the repo and drop
 `plugins/fast-feedback/skills/fast-feedback/` into `~/.claude/skills/`. (You lose
@@ -35,6 +35,25 @@ the auto-update path that way.)
 
 **Requirements:** Node.js 18+ (the scripts use built-in `fetch`/`http`), and a
 modern browser.
+
+---
+
+## Updating
+
+When the settings popup shows the in-overlay **update available** badge, run:
+
+```text
+/plugin marketplace update fast-feedback
+/plugin update fast-feedback@fast-feedback
+/reload-plugins
+```
+
+ffb checks for a newer version when the ffb process starts (the proxy/static
+server, or when generating the console snippet), from your own machine — the
+same place `/plugin` already talks to GitHub. It checks at most once per run and
+is fully fail-silent: offline or blocked means no badge and no error. Because
+the check runs in the Node process, not in the page, it does not send anything
+about the app you are reviewing to GitHub.
 
 ---
 
@@ -135,9 +154,16 @@ component and make the change, then you re-annotate the result. That tight
 This repository is the source of truth. The plugin bundles a single skill at
 `plugins/fast-feedback/skills/fast-feedback/`; the overlay engine is
 `assets/overlay.js` (a self-contained IIFE, prefixed `__ffb`), with a vendored
-`html2canvas` (MIT) for offline screenshots. Edit here, bump the versions in
-`.claude-plugin/marketplace.json` and `plugins/fast-feedback/.claude-plugin/plugin.json`,
-and push — installed users update from the `/plugin` menu.
+`html2canvas` (MIT) for offline screenshots. On each release, bump these three
+version fields in lockstep:
+
+- `plugins/fast-feedback/.claude-plugin/plugin.json`
+- `.claude-plugin/marketplace.json` `metadata.version`
+- `.claude-plugin/marketplace.json` `plugins[fast-feedback].version`
+
+`server.mjs` reads `plugin.json`, so it follows automatically. The overlay badge
+is driven by `marketplace.json` `plugins[fast-feedback].version`; if that field
+is not bumped, users will not see the update.
 
 ## License
 
