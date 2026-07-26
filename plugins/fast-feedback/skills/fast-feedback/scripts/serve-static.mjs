@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { createReadStream, readFileSync, statSync } from "node:fs";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { handleFfbRoute, injectBoot, renderBoot } from "./serve-core.mjs";
+import { ensureVersionChecked } from "./update-check.mjs";
 
 const argv = process.argv.slice(2);
 const portIndex = argv.indexOf("--port");
@@ -150,6 +151,7 @@ const server = http.createServer((creq, cres) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
+  ensureVersionChecked(); // warm the once-per-process upstream version check (fail-silent)
   const url = "http://127.0.0.1:" + PORT;
   // Open/advertise the document by its filename, not "/", so location.href
   // carries the name. overlay.js serializes location.href into each Send item,

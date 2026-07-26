@@ -16,6 +16,20 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { currentLatest, versionInfo, ensureVersionChecked } from "./update-check.mjs";
+
+const PLUGIN_VERSION = (() => {
+  try {
+    const path = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", ".claude-plugin", "plugin.json");
+    const { version } = JSON.parse(readFileSync(path, "utf8"));
+    return typeof version === "string" ? version : null;
+  } catch {
+    return null;
+  }
+})();
+
+export { ensureVersionChecked };
 
 export function globalPath() { return join(homedir(), ".config", "fast-feedback", "settings.json"); }
 export function projectPath() { return join(process.cwd(), ".claude", "skills", "fast-feedback", "settings.json"); }
@@ -73,8 +87,12 @@ export function saveScreenshot(buffer) {
 }
 
 export function bootAssignments() {
+  const info = versionInfo(PLUGIN_VERSION, currentLatest());
   return "window.__FFB_PROJECT=" + JSON.stringify(projectId()) + ";" +
-    "window.__FFB_SETTINGS=" + JSON.stringify(readForProject()) + ";";
+    "window.__FFB_SETTINGS=" + JSON.stringify(readForProject()) + ";" +
+    "window.__FFB_VERSION=" + JSON.stringify(info.current) + ";" +
+    "window.__FFB_LATEST=" + JSON.stringify(info.latest) + ";" +
+    "window.__FFB_OUTDATED=" + JSON.stringify(info.outdated) + ";";
 }
 
 // Merge a change from the overlay into the correct file.

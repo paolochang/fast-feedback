@@ -25,6 +25,7 @@ import http from "node:http";
 import net from "node:net";
 import { isLoopbackHost } from "./proxy-guards.mjs";
 import { FFB_SEND_TOKEN, STRIP, handleFfbRoute, injectBoot, renderBoot } from "./serve-core.mjs";
+import { ensureVersionChecked } from "./update-check.mjs";
 
 export { FFB_SEND_TOKEN };
 
@@ -110,6 +111,7 @@ server.on("upgrade", function (creq, csocket, head) {
 });
 
 server.listen(PORT, "127.0.0.1", function () {
+  ensureVersionChecked(); // warm the once-per-process upstream version check (fail-silent)
   console.log("fast-feedback proxy running:");
   console.log("  http://localhost:" + PORT + "  →  " + target);
   console.log("");
