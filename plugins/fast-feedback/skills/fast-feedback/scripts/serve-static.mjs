@@ -75,7 +75,10 @@ function ensureCharset(html) {
 
 function renderHtml(path) {
   const source = readFileSync(path, "utf8");
-  const boot = renderBoot({ fileLabel: documentName });
+  // Label each injected page by the file actually being served, not the CLI
+  // input — a mockup that links to a sibling .html gets feedback attributed to
+  // that page, so the agent edits the right file.
+  const boot = renderBoot({ fileLabel: basename(path) });
   if (/<\/body\s*>/i.test(source)) return injectBoot(ensureCharset(source), boot);
   return "<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n</head>\n<body>\n" + source + "\n" + boot + "\n</body>\n</html>\n";
 }

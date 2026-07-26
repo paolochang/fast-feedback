@@ -259,3 +259,16 @@ test("accepts --port before the selected document", async () => {
     }
   });
 });
+
+test("labels an injected linked page with its own filename", async () => {
+  await withStatic({ "mockup.html": "<body>home</body>", "page2.html": "<body>page two</body>" }, async ({ file, inbox }) => {
+    const server = await startStatic(file, inbox);
+    try {
+      const response = await request({ port: server.port, path: "/page2.html" });
+      assert.equal(response.status, 200);
+      assert.match(response.body, /window\.__FFB_FILE="page2\.html"/);
+    } finally {
+      await server.close();
+    }
+  });
+});
