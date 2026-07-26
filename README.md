@@ -46,13 +46,15 @@ or run the scripts directly. Script paths below are relative to the skill dir
 
 ### 1. Static mockup / prototype (file mode)
 
-Injects the overlay into a **copy** of an HTML file (the original is never
-touched) and opens it:
+Serves an HTML file with the overlay injected (the original is never touched):
 
 ```bash
-node scripts/inject.mjs path/to/mockup.html
-# writes path/to/mockup.review.html and opens it
+node scripts/serve-static.mjs path/to/mockup.html [--port 5000]
+# opens http://127.0.0.1:5000 with Send to AI and write-back available
 ```
+
+Run it from the project root so it and the MCP server share `.ffb/`, or set
+`FFB_INBOX` to the same absolute inbox path for both processes.
 
 ### 2. Running dev server (proxy mode — recommended for apps)
 
@@ -113,8 +115,9 @@ On macOS the shortcuts use `⌘`; combos support `Ctrl(+Alt/+Shift)+key`.
 - **Theme** (Light / Dark) and **highlight color** — saved **per project**.
 - **Hotkeys** and **screenshot save** — saved **globally**.
 - Global settings live in `~/.config/fast-feedback/settings.json`; project settings
-  in `<project>/.claude/skills/fast-feedback/settings.json`. In proxy mode the
-  overlay writes changes back automatically so they survive to the next run.
+  in `<project>/.claude/skills/fast-feedback/settings.json`. In served file and
+  proxy mode the overlay writes changes back automatically so they survive to the
+  next run.
 
 ---
 

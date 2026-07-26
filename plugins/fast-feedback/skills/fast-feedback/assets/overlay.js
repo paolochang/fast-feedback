@@ -1,8 +1,8 @@
 // fast-feedback overlay engine — one self-contained IIFE, no dependencies.
 //
 // Used by BOTH modes:
-//   - file mode: inject.mjs wraps this in a script tag inside a copy of a
-//     static HTML mockup, and sets window.__FFB_FILE to the filename.
+//   - file mode: serve-static.mjs injects this into a served static HTML mockup
+//     and sets window.__FFB_FILE to the filename.
 //   - live mode: build-live.mjs ships this verbatim as a console snippet /
 //     bookmarklet the user pastes into a RUNNING app's page. Because it runs
 //     inside the page (same origin), document.elementFromPoint sees the real
@@ -844,8 +844,8 @@
   }
 
   // ---- send to AI --------------------------------------------------------
-  // Live/proxy mode injects __FFB_SEND. File and console modes archive locally
-  // through historyStore, keeping Copy All as the universal fallback.
+  // Served file and live/proxy modes inject __FFB_SEND. Console/bookmarklet mode
+  // archives locally through historyStore, keeping Copy All as the universal fallback.
   var sendInFlight = false;
   function sendToAI() {
     var canSend = typeof window.__FFB_SEND === "function";
@@ -1043,9 +1043,9 @@
     // Render → PNG blob. Restore our chrome the moment the canvas is ready.
     var blobPromise = capturePng(false).then(function (capture) { return capture.blob; });
 
-    // Put a copy on disk. Live/proxy mode POSTs the PNG and the server writes it
-    // to the configured folder; file/console mode has no server, so it falls back
-    // to a normal browser download (Downloads folder).
+    // Put a copy on disk. Served file and live/proxy modes POST the PNG and the
+    // server writes it to the configured folder; console/bookmarklet mode falls
+    // back to a normal browser download (Downloads folder).
     function downloadShot(blob) {
       var url = URL.createObjectURL(blob);
       var a = document.createElement("a");
@@ -1203,10 +1203,10 @@
 
   // ---- screenshot save-to-folder (global) -------------------------------
   // Clipboard copy is always on; this adds an optional saved copy. Writing to an
-  // exact path needs a server, so it only fully applies in live/proxy mode (which
-  // exposes window.__FFB_SAVE_SHOT). In file/console mode there's no server, so a
+  // exact path needs a server, so it fully applies in served file and live/proxy
+  // modes (which expose window.__FFB_SAVE_SHOT). In console/bookmarklet mode, a
   // "saved" shot falls back to a normal browser download (Downloads folder) and
-  // the folder path can't be honored — the dialog says as much.
+  // the folder path cannot be honored — the dialog says as much.
   var SHOT_DEFAULT_DIR = INJECTED.screenshotDefaultDir || "";
   var shot = (function () {
     var s = { save: false, dir: "" };
@@ -1400,9 +1400,9 @@
     srows.appendChild(hsec);
     var sep = document.createElement("div"); sep.className = "__ffb_srow_sep"; srows.appendChild(sep);
 
-    // screenshots: save-to-folder (global). Toggle + path. The path only fully
-    // applies in live/proxy mode (a server writes it); file/console mode has no
-    // server and falls back to a browser download, which the hint spells out.
+    // screenshots: save-to-folder (global). Toggle + path. The path fully
+    // applies in served file and live/proxy modes (a server writes it);
+    // console/bookmarklet mode falls back to a browser download, which the hint spells out.
     var ssec = document.createElement("div");
     ssec.className = "__ffb_hlsec";
     ssec.innerHTML =

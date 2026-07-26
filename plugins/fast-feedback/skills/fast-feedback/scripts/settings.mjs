@@ -10,8 +10,8 @@
 //     <cwd>/.claude/skills/fast-feedback/settings.json  -> { "theme": "...", "highlight": {...} }
 //     (add it to the project's .gitignore if you don't want it committed)
 //
-// The build scripts read both and inject window.__FFB_SETTINGS; the proxy writes
-// the matching file back when the user changes something in the ⚙ dialog.
+// The build scripts read both and inject window.__FFB_SETTINGS; served file and
+// proxy servers write the matching file back when the user changes something in the ⚙ dialog.
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -61,8 +61,8 @@ export function screenshotDir() {
 }
 
 // Write a captured PNG to the configured folder; returns the absolute path. Only
-// the proxy calls this (file/console mode has no server to write with). The name
-// carries a timestamp so repeated shots don't clobber each other.
+// served file and proxy servers call this; console/bookmarklet mode has no server
+// to write with. The name carries a timestamp so repeated shots do not clobber each other.
 export function saveScreenshot(buffer) {
   const dir = screenshotDir();
   mkdirSync(dir, { recursive: true });
