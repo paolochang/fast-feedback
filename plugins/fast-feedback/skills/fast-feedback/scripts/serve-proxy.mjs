@@ -110,8 +110,11 @@ server.on("upgrade", function (creq, csocket, head) {
   csocket.on("error", function () { psocket.destroy(); });
 });
 
-server.listen(PORT, "127.0.0.1", function () {
-  ensureVersionChecked(); // warm the once-per-process upstream version check (fail-silent)
+server.listen(PORT, "127.0.0.1", async function () {
+  // Await the version check before advertising the URL (bounded to ~3s by the
+  // wall-clock timeout, fail-silent) so the badge is present on the first paint
+  // once the user opens the printed URL — mirrors serve-static.
+  await ensureVersionChecked();
   console.log("fast-feedback proxy running:");
   console.log("  http://localhost:" + PORT + "  →  " + target);
   console.log("");
