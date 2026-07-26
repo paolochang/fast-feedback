@@ -34,8 +34,8 @@ frontend is a file or a running server. **Pick the mode first.**
 ## Which mode?
 
 - **A static HTML file** exists on disk (a `*.mockup.html`, a prototype, an
-  exported page) → **file mode**. Injects the overlay into a *copy*; the
-  original is never touched.
+  exported page) → **file mode**. Serves the file with the overlay injected;
+  the original is never touched.
 - **A dev server is running** (localhost:3000, a live React/Vue/Angular/Next app,
   HMR, routing, real state) → **live mode**. There is no single file to copy, so
   the overlay is served *in front of* the app by a small proxy and runs on the
@@ -53,18 +53,21 @@ overlay runs *same-origin* with the app: full DOM access, no iframe.
 
 1. **Find the HTML file** the user is reviewing (a path they give, or the mockup
    you just produced).
-2. **Generate the review copy:**
+2. **Serve the file with the overlay:**
    ```bash
-   node <skill>/scripts/inject.mjs "<path/to/mockup.html>"
+   node <skill>/scripts/serve-static.mjs "<path/to/mockup.html>" [--port 5000]
    ```
-   Writes `<path/to/mockup.review.html>` next to the original (relative assets
-   still resolve) and **auto-opens it in the default browser**. Optional 2nd arg
-   = explicit output path. Set `FFB_NO_OPEN=1` to skip auto-open (headless/CI).
-3. **The file opens automatically** — tell the user to annotate (see *Annotating*
-   below). If it embeds a video and seeking is blocked over `file://`, serve the
-   folder over HTTP instead (any static server).
-4. **Read the pasted feedback and edit the original** file. Re-run the injector
-   for the next round if useful.
+   It serves the file and its relative assets at `http://127.0.0.1:5000` and
+   **auto-opens it in the default browser**. Set `FFB_NO_OPEN=1` to skip
+   auto-open (headless/CI). Run this command from the **project root** so the
+   static server and MCP server share `<project-root>/.ffb/`; if they must use
+   different working directories, set `FFB_INBOX` to the same absolute inbox
+   path for both.
+3. **Tell the user to annotate** (see *Annotating* below), then use **Send to
+   AI** to deliver new annotations to the MCP server. Settings write-back and
+   saving screenshots to a folder work in served file mode too.
+4. **Read the feedback and edit the original** file. Reload the served page for
+   the next round if useful.
 
 ## Live mode (running dev server) — proxy (default)
 
@@ -106,13 +109,14 @@ running just adds a wrapper on a new port.
    text quote points you at the right component even when class names are
    hashed/utility.
 
-### Send feedback directly to the AI (live/proxy mode)
+### Send feedback directly to the AI (served file or live/proxy mode)
 
-In live/proxy mode, the overlay's **Send to AI** button (default hotkey:
+In served file or live/proxy mode, the overlay's **Send to AI** button (default hotkey:
 **Ctrl+Backslash**) sends new annotations to the local inbox for the MCP server. Use it
 after submitting the notes you want applied. **Copy All** (default **Ctrl+'**)
-remains the universal fallback for file mode, non-MCP clients, human reviewers,
-and web chat: paste the copied feedback into the conversation as usual.
+remains the universal fallback for console/bookmarklet mode, non-MCP clients,
+human reviewers, and web chat: paste the copied feedback into the conversation
+as usual.
 
 Claude Code auto-registers the Fast Feedback MCP server when this plugin is
 installed. It provides four tools:
@@ -180,10 +184,11 @@ user:
   over `file://`) it falls back to downloading `feedback-screenshot.png`.
   Optionally the shot is **also saved to a folder** (⚙ → *Save screenshots to a
   folder*, off by default). Because a browser can't write an arbitrary path, this
-  only fully applies in **proxy/live mode**: the overlay POSTs the PNG to the
-  proxy, which writes `feedback-<timestamp>.png` into the configured folder
-  (blank = `<os-temp>/fast-feedback-shots`). In file/console mode there's no
-  server, so a "saved" shot downloads to the browser's Downloads folder instead.
+  fully applies in **served file and live/proxy modes**: the overlay POSTs the
+  PNG to the server, which writes `feedback-<timestamp>.png` into the configured
+  folder (blank = `<os-temp>/fast-feedback-shots`). In console/bookmarklet mode
+  there is no server, so a "saved" shot downloads to the browser's Downloads
+  folder instead.
 
 - shows/hides the **whole overlay** with **Ctrl+.** — the bar, boxes and top
   spacer all disappear and the page behaves normally, so it stays out of the way
@@ -198,7 +203,7 @@ user:
     custom picker popover (SV square + hue slider + hex/RGB + 6 presets); **Reset**
     returns to the mode default.
   - **Screenshots** — *Save screenshots to a folder* (global, off by default) +
-    a folder path. See the Screenshot bullet above for the proxy-vs-file behavior.
+    a folder path. See the Screenshot bullet above for the served-vs-console behavior.
   - **Hotkeys** — rebind any shortcut to **Ctrl** (or ⌘) plus optional **Alt** /
     **Shift** plus one key (e.g. `Ctrl+Alt+K`), so a user whose environment
     already grabs a default can pick a free combo. Matched by physical key
@@ -210,9 +215,10 @@ Persistence across triggers: settings live in **two files** — global
 (`~/.config/fast-feedback/settings.json`: hotkeys + screenshot prefs) and project
 (`<cwd>/.claude/skills/fast-feedback/settings.json`: theme + highlight). The build
 scripts read both and inject them as `window.__FFB_SETTINGS`, so the next time the
-skill runs it restores them. In **proxy mode** the overlay writes changes back to
-the right file automatically (the proxy exposes the write route); in file/console
-mode changes persist via `localStorage` for that page.
+skill runs it restores them. In **served file and live/proxy modes** the overlay
+writes changes back to the right file automatically (the server exposes the
+write route); in console/bookmarklet mode changes persist via `localStorage` for
+that page.
 
 Hotkeys (defaults — all rebindable in ⚙): **Ctrl+.** show/hide · **Ctrl+/**
 annotate (**Esc** disarms) · **Ctrl+[** list · **Ctrl+'** copy · **Ctrl+;**
@@ -244,7 +250,7 @@ confirm what you changed per item.
 - **Self-contained.** No dependencies, no network. The engine injects its own
   CSS and is prefixed `__ffb` so it won't clash with the host page. Pasting the
   live snippet twice is safe (it no-ops and re-shows the bar).
-- **No `</body>`?** File-mode injector appends the overlay at end-of-file, so it
-  still works on fragment-y HTML.
+- **No `</body>`?** The file-mode server wraps fragment-y HTML and appends the
+  overlay, so it still works.
 - This skill produces the overlay and consumes the feedback — it does not itself
   edit the UI. You make the edits based on the feedback.
