@@ -27,6 +27,14 @@ test("parseMarketplace returns null when fast-feedback is absent", () => {
   assert.equal(successfulCheck.parseMarketplace(JSON.stringify({ plugins: [] })), null);
 });
 
+test("parseMarketplace rejects non-semver fast-feedback versions", () => {
+  for (const version of ["1.0.0</script>", "latest", "1.2"]) {
+    assert.equal(successfulCheck.parseMarketplace(JSON.stringify({
+      plugins: [{ name: "fast-feedback", version }],
+    })), null);
+  }
+});
+
 test("versionInfo reports whether the latest version is newer", () => {
   assert.deepEqual(successfulCheck.versionInfo("0.2.0", "0.2.1"), {
     current: "0.2.0",

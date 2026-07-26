@@ -2,13 +2,15 @@ import { get } from "node:https";
 import { isNewer, extractLatestVersion } from "./version.mjs";
 
 const MARKETPLACE_URL = "https://raw.githubusercontent.com/paolochang/fast-feedback/main/.claude-plugin/marketplace.json";
+const MAX_BODY = 256 * 1024;
 
 let cachedLatest = null;
 let started = null;
 
 export function parseMarketplace(text) {
   try {
-    return extractLatestVersion(JSON.parse(text));
+    const latest = extractLatestVersion(JSON.parse(text));
+    return typeof latest === "string" && /^\d+\.\d+\.\d+$/.test(latest) ? latest : null;
   } catch {
     return null;
   }
@@ -30,7 +32,7 @@ export function currentLatest() {
 
 function fetchMarketplace() {
   return new Promise((resolve, reject) => {
-    const request = get(MARKETPLACE_URL, (response) => {
+    const request = get(MARKETPLACE_URL, { signal: AbortSignal.timeout(3000) }, (response) => {
       if (response.statusCode < 200 || response.statusCode >= 300) {
         response.resume();
         reject(new Error(`Unexpected status: ${response.statusCode}`));
@@ -39,12 +41,17 @@ function fetchMarketplace() {
 
       let body = "";
       response.setEncoding("utf8");
-      response.on("data", (chunk) => { body += chunk; });
+      response.on("data", (chunk) => {
+        if (body.length + chunk.length > MAX_BODY) {
+          request.destroy(new Error("Marketplace response too large"));
+          return;
+        }
+        body += chunk;
+      });
       response.on("end", () => resolve(body));
       response.on("error", reject);
     });
 
-    request.setTimeout(3000, () => request.destroy(new Error("Version check timed out")));
     request.on("error", reject);
   });
 }

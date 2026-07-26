@@ -150,8 +150,8 @@ const server = http.createServer((creq, cres) => {
   });
 });
 
-server.listen(PORT, "127.0.0.1", () => {
-  ensureVersionChecked(); // warm the once-per-process upstream version check (fail-silent)
+server.listen(PORT, "127.0.0.1", async () => {
+  await ensureVersionChecked();
   const url = "http://127.0.0.1:" + PORT;
   // Open/advertise the document by its filename, not "/", so location.href
   // carries the name. overlay.js serializes location.href into each Send item,
