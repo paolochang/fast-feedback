@@ -1,3 +1,9 @@
+// Report whether `latest` is strictly newer than `current`. Only strict 3-part
+// numeric versions (X.Y.Z) are compared; anything else — including semver
+// prereleases like "0.3.0-rc.1" — returns false. This is intentional and
+// fail-safe: fast-feedback publishes only 3-part versions (see README's release
+// bump), and the badge is advisory, so an unrecognized version shows no badge
+// rather than a possibly-wrong "update available".
 export function isNewer(latest, current) {
   if (
     typeof latest !== "string" ||

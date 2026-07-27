@@ -165,6 +165,10 @@ version fields in lockstep:
 is driven by `marketplace.json` `plugins[fast-feedback].version`; if that field
 is not bumped, users will not see the update.
 
+Versions are 3-part `X.Y.Z` — fast-feedback does not publish prereleases. The
+update check compares only 3-part versions and is fail-safe: anything it does
+not recognize simply shows no badge, never a wrong one.
+
 ## License
 
 [MIT](./LICENSE) © Paolo Chang. Copy it, fork it, use it freely.

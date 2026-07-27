@@ -10,6 +10,9 @@ let started = null;
 export function parseMarketplace(text) {
   try {
     const latest = extractLatestVersion(JSON.parse(text));
+    // Same strict-X.Y.Z contract as isNewer (fast-feedback ships only 3-part
+    // versions); this also keeps a non-conforming value out of the inline boot
+    // <script> it is injected into.
     return typeof latest === "string" && /^\d+\.\d+\.\d+$/.test(latest) ? latest : null;
   } catch {
     return null;
