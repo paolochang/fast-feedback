@@ -188,6 +188,10 @@
     '.__ffb_toast{position:fixed;z-index:2147483647;right:14px;bottom:14px;display:none;max-width:320px;padding:9px 12px;background:var(--__ffb_surf);border:1px solid var(--__ffb_line);border-radius:8px;box-shadow:0 8px 24px var(--__ffb_shadow);color:var(--__ffb_ink);font:600 12.5px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}',
     '.__ffb_toast.open{display:block}',
     '.__ffb_toast.error{color:var(--__ffb_warn);border-color:var(--__ffb_warn)}',
+    '.__ffb_arm{position:fixed;z-index:2147483644;bottom:14px;left:50%;transform:translateX(-50%);display:none;align-items:center;gap:7px;padding:7px 10px;background:var(--__ffb_surf);border:1px solid var(--__ffb_line);border-radius:8px;box-shadow:0 8px 24px var(--__ffb_shadow);color:var(--__ffb_ink);font:600 12.5px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;pointer-events:none;white-space:nowrap}',
+    '.__ffb_arm.on{display:flex}',
+    '.__ffb_arm .__ffb_logo{color:var(--__ffb_gold)}',
+    '.__ffb_armhint{color:var(--__ffb_mut);font-weight:500}',
     '.__ffb_tiptext{color:var(--__ffb_ink);font-weight:500}',
     '.__ffb_keys{display:inline-flex;align-items:center;gap:4px}',
     '.__ffb_kbd{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-width:20px;height:20px;padding:0 7px;background:var(--__ffb_chip);color:var(--__ffb_chipink);border:1px solid rgba(127,127,127,.22);border-radius:6px;font-size:11px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}',
@@ -239,6 +243,12 @@
   var toast = document.createElement("div");
   toast.className = "__ffb_toast";
   root.appendChild(toast);
+  var arm = document.createElement("div");
+  arm.className = "__ffb_arm";
+  arm.setAttribute("role", "status");
+  arm.setAttribute("aria-live", "polite");
+  arm.innerHTML = LOGO + '<span>Write mode</span><span class="__ffb_armhint">drag a box · Esc to cancel</span>';
+  root.appendChild(arm);
   var toastTimer = null;
   function showToast(message, error) {
     clearTimeout(toastTimer);
@@ -351,6 +361,7 @@
   // The bar hides while Write is armed so the band beneath it can be annotated.
   function syncBarVisibility() {
     bar.style.display = enabled && !active ? "flex" : "none";
+    arm.classList.toggle("on", enabled && active);
   }
 
   // "Write" arms the highlight cursor. It's NOT a sticky toggle: after one box
@@ -988,7 +999,7 @@
   function capturePngNow(hideBoxes) {
     var h2c = window.html2canvas;
     if (typeof h2c !== "function") return Promise.reject(new Error("Screenshot needs the bundled html2canvas, which didn't load on this page."));
-    var chrome = [bar, panel, form, confirmEl, layer];
+    var chrome = [bar, panel, form, confirmEl, layer, arm];
     if (hideBoxes) chrome.push(boxwrap);
     var vis = chrome.map(function (n) { return n.style.visibility; });
     chrome.forEach(function (n) { n.style.visibility = "hidden"; });
@@ -1598,7 +1609,7 @@
   window.__ffb_show = function () { setEnabled(true); setActive(false); };
   window.__ffb_teardown = function () {
     clearHistoryThumbs();
-    [bar, toast, layer, boxwrap, form, panel, confirmEl, settingsEl, style].forEach(function (n) { if (n && n.remove) n.remove(); });
+    [bar, toast, arm, layer, boxwrap, form, panel, confirmEl, settingsEl, style].forEach(function (n) { if (n && n.remove) n.remove(); });
     window.__ffb_loaded = false;
   };
 
