@@ -270,6 +270,17 @@
     };
   }
 
+  function sendLabel(canSend) {
+    if (canSend === true) {
+      return { label: "Send to AI", title: "Send new feedback to AI" };
+    }
+
+    return {
+      label: "Archive locally",
+      title: "No server in this mode — archives to History. Use Copy All to reach the AI.",
+    };
+  }
+
   var layer = document.createElement("div");
   layer.className = "__ffb_layer";
   root.appendChild(layer);
@@ -291,6 +302,7 @@
   var fTa = form.querySelector("#__ffb_fta");
 
   // ---- list panel -------------------------------------------------------
+  var sendButton = sendLabel(typeof window.__FFB_SEND === "function");
   var panel = document.createElement("div");
   panel.className = "__ffb_panel";
   panel.innerHTML =
@@ -301,7 +313,7 @@
     '<div class="__ffb_tabs"><button class="__ffb_tab sel" data-tab="live">Live</button><button class="__ffb_tab" data-tab="history">History</button></div>' +
     '<div class="__ffb_list" id="__ffb_items"></div>' +
     '<div id="__ffb_foot" style="padding:10px 12px;border-top:1px solid var(--__ffb_line);display:flex">' +
-    '<button class="__ffb_btn primary" id="__ffb_psend" title="Send new feedback to AI" style="flex:1;padding:8px 12px">Send to AI</button></div>';
+    '<button class="__ffb_btn primary" id="__ffb_psend" title="' + sendButton.title + '" style="flex:1;padding:8px 12px">' + sendButton.label + '</button></div>';
   root.appendChild(panel);
   var itemsEl = panel.querySelector("#__ffb_items");
   var activeListTab = "live", historyRows = null, historyLoading = false, historyError = false;
@@ -1128,7 +1140,7 @@
     screenshot: { ctrl: true, alt: false, shift: false, code: "Semicolon" },
     settings:   { ctrl: true, alt: false, shift: false, code: "Comma" }
   };
-  var HK_ORDER = [["toggle", "Show / hide"], ["write", "Write (annotate)"], ["list", "List"], ["copy", "Copy all"], ["send", "Send to AI"], ["screenshot", "Screenshot"], ["settings", "Open settings"]];
+  var HK_ORDER = [["toggle", "Show / hide"], ["write", "Write (annotate)"], ["list", "List"], ["copy", "Copy all"], ["send", "Send / Archive"], ["screenshot", "Screenshot"], ["settings", "Open settings"]];
   function cloneBinding(b) { return { ctrl: !!b.ctrl, alt: !!b.alt, shift: !!b.shift, code: String(b.code) }; }
   function safeLS(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 
