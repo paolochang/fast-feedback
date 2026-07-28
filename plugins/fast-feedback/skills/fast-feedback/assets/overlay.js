@@ -201,10 +201,6 @@
   style.textContent = CSS;
   document.head.appendChild(style);
 
-  // Push the page down so the top strip never overlaps the app's own header.
-  var prevBodyMt = document.body.style.marginTop;
-  document.body.style.marginTop = BAR_H + "px";
-
   var FILE = window.__FFB_FILE || document.title || (location.pathname + location.search) || "frontend";
   var anns = [];            // committed: {id, n, sel, region, comment, sent, revision, boxEl}
   var counter = 0;
@@ -986,26 +982,20 @@
     if (hideBoxes) chrome.push(boxwrap);
     var vis = chrome.map(function (n) { return n.style.visibility; });
     chrome.forEach(function (n) { n.style.visibility = "hidden"; });
-    var mt = document.body.style.marginTop;      // drop the top strip's spacer
-    var bodyTop = document.body.getBoundingClientRect().top;
-    document.body.style.marginTop = prevBodyMt;   // so there's no empty band
-    var captureShiftY = bodyTop - document.body.getBoundingClientRect().top;
     var restored = false;
     var restore = function () {
       if (restored) return; restored = true;
       chrome.forEach(function (n, i) { n.style.visibility = vis[i]; });
-      document.body.style.marginTop = mt;
     };
     // Freeze the document dimensions BEFORE html2canvas clones the DOM: the canvas
     // reflects the document at render start, so normalizing regions against a
-    // later live scrollWidth/Height (an SPA resize mid-render) would shift every
-    // box. Read after the spacer removal above so it matches the rendered canvas.
+    // later live scrollWidth/Height (an SPA resize mid-render) would shift every box.
     var captureDocW = document.documentElement.scrollWidth || 1;
     var captureDocH = document.documentElement.scrollHeight || 1;
     try {
       return Promise.resolve(h2c(document.documentElement, { backgroundColor: null, useCORS: true, logging: false, scale: window.devicePixelRatio || 1 }))
         .then(function (canvas) {
-          var capture = { w: canvas.width, h: canvas.height, docW: captureDocW, docH: captureDocH, shiftY: captureShiftY };
+          var capture = { w: canvas.width, h: canvas.height, docW: captureDocW, docH: captureDocH };
           restore();
           return new Promise(function (res, rej) {
             canvas.toBlob(function (blob) { blob ? res({ blob: blob, capture: capture }) : rej(new Error("toBlob returned null")); }, "image/png");
@@ -1029,7 +1019,7 @@
     var pct = function (v, total) { return Math.max(0, Math.min(100, Math.round((v / total) * 10000) / 100)); };
     return {
       x: pct(rect.left * scaleX, capture.w),
-      y: pct((rect.top - capture.shiftY) * scaleY, capture.h),
+      y: pct(rect.top * scaleY, capture.h),
       w: pct(rect.width * scaleX, capture.w),
       h: pct(rect.height * scaleY, capture.h)
     };
@@ -1553,8 +1543,7 @@
   // The whole overlay can be hidden with Ctrl+. and brought back the same way,
   // so it stays out of the way when you're just using the app (important when
   // it's always injected — e.g. served through the dev proxy). The choice is
-  // remembered in localStorage so a reload keeps it as you left it. Disabling
-  // drops the top spacer too, so the page lays out exactly as it normally would.
+  // remembered in localStorage so a reload keeps it as you left it.
   var enabled = true;
   try { enabled = localStorage.getItem("__ffb_enabled") !== "0"; } catch (e) {}
   function setEnabled(v) {
@@ -1562,7 +1551,6 @@
     try { localStorage.setItem("__ffb_enabled", v ? "1" : "0"); } catch (e) {}
     bar.style.display = v ? "flex" : "none";
     boxwrap.style.display = v ? "" : "none";
-    document.body.style.marginTop = v ? (BAR_H + "px") : prevBodyMt;
     if (!v) { closeList(); form.classList.remove("open"); confirmEl.classList.remove("open"); closeSettings(); setActive(false); }
   }
 
@@ -1599,7 +1587,6 @@
   // ---- re-show hook (live mode paste-twice) -----------------------------
   window.__ffb_show = function () { setEnabled(true); };
   window.__ffb_teardown = function () {
-    document.body.style.marginTop = prevBodyMt;
     clearHistoryThumbs();
     [bar, toast, layer, boxwrap, form, panel, confirmEl, settingsEl, style].forEach(function (n) { if (n && n.remove) n.remove(); });
     window.__ffb_loaded = false;
