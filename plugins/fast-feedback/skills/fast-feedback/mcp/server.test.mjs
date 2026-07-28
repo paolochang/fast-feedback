@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { appendItems } from "../scripts/inbox.mjs";
+import { appendItems, writeSession } from "../scripts/inbox.mjs";
 import { handleRequest, serveStdio, toolDefinitions, waitForFeedback } from "./server.mjs";
 
 async function withInbox(run) {
@@ -53,24 +54,26 @@ test("pull clears feedback while peek and status preserve it", { concurrency: fa
     const items = [{ n: 1, comment: "first" }, { n: 2, comment: "second" }];
     await appendItems(items);
 
-    assert.deepEqual(JSON.parse((await toolCall("ffb_status")).result.content[0].text), {
-      pending: 2,
-      inbox,
-    });
+    const firstStatus = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+    assert.equal(firstStatus.pending, 2);
+    assert.equal(firstStatus.inbox, inbox);
+    assert.deepEqual(firstStatus.server, { state: "none" });
+    assert.match(firstStatus.hint, /No pending feedback at the inbox this MCP reads/);
     assert.deepEqual(
       JSON.parse((await toolCall("ffb_peek")).result.content[0].text).map(({ id, ...item }) => item).sort((left, right) => left.n - right.n),
       items,
     );
-    assert.deepEqual(JSON.parse((await toolCall("ffb_status")).result.content[0].text), {
-      pending: 2,
-      inbox,
-    });
+    const secondStatus = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+    assert.equal(secondStatus.pending, 2);
+    assert.equal(secondStatus.inbox, inbox);
+    assert.deepEqual(secondStatus.server, { state: "none" });
+    assert.match(secondStatus.hint, /No pending feedback at the inbox this MCP reads/);
     assert.deepEqual(
       JSON.parse((await toolCall("ffb_pull")).result.content[0].text).map(({ id, ...item }) => item).sort((left, right) => left.n - right.n),
       items,
     );
     const emptyStatus = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
-    assert.deepEqual(Object.keys(emptyStatus), ["pending", "inbox", "hint"]);
+    assert.deepEqual(Object.keys(emptyStatus), ["pending", "inbox", "server", "hint"]);
     assert.equal(emptyStatus.pending, 0);
     assert.equal(emptyStatus.inbox, inbox);
     assert.match(emptyStatus.hint, /No pending feedback at the inbox this MCP reads/);
@@ -83,6 +86,50 @@ test("pull clears feedback while peek and status preserve it", { concurrency: fa
     const [emptyPeekJson, emptyPeekPointer] = emptyPeek.split("\n");
     assert.deepEqual(JSON.parse(emptyPeekJson), []);
     assert.equal(emptyPeekPointer, " — call ffb_status to see whether a server is running and which inbox is being read.");
+  });
+});
+
+test("ffb_status reports marker liveness and only hints when not running", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    const none = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+    assert.deepEqual(none.server, { state: "none" });
+    assert.ok(none.hint);
+
+    const server = http.createServer((request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ffb: true, mode: "static" }));
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const url = "http://127.0.0.1:" + server.address().port;
+    try {
+      await writeSession({ mode: "static", version: "0.3.0", url, started_at: "2026-07-28T12:00:00.000Z" });
+      const running = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+      assert.deepEqual(running.server, { state: "running", mode: "static", url, started_at: "2026-07-28T12:00:00.000Z" });
+      assert.equal(running.hint, undefined);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+
+    const foreign = http.createServer((request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ffb: false }));
+    });
+    await new Promise((resolve) => foreign.listen(0, "127.0.0.1", resolve));
+    const foreignUrl = "http://127.0.0.1:" + foreign.address().port;
+    try {
+      await writeSession({ mode: "static", version: "0.3.0", url: foreignUrl, started_at: "2026-07-28T12:00:00.000Z" });
+      const foreignStatus = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+      assert.deepEqual(foreignStatus.server, { state: "not_responding", mode: "static", url: foreignUrl, started_at: "2026-07-28T12:00:00.000Z" });
+      assert.ok(foreignStatus.hint);
+    } finally {
+      await new Promise((resolve) => foreign.close(resolve));
+    }
+
+    const started = Date.now();
+    const stopped = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+    assert.ok(Date.now() - started < 1000);
+    assert.deepEqual(stopped.server, { state: "not_responding", mode: "static", url: foreignUrl, started_at: "2026-07-28T12:00:00.000Z" });
+    assert.ok(stopped.hint);
   });
 });
 

@@ -6,7 +6,16 @@ import { spawn } from "node:child_process";
 import { createReadStream, readFileSync, statSync } from "node:fs";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { handleFfbRoute, injectBoot, renderBoot } from "./serve-core.mjs";
+import { inboxPath, writeSession } from "./inbox.mjs";
 import { ensureVersionChecked } from "./update-check.mjs";
+
+const PLUGIN_VERSION = (() => {
+  try {
+    return JSON.parse(readFileSync(new URL("../../../.claude-plugin/plugin.json", import.meta.url), "utf8")).version;
+  } catch {
+    return "0.0.0";
+  }
+})();
 
 const argv = process.argv.slice(2);
 const portIndex = argv.indexOf("--port");
@@ -95,7 +104,7 @@ function openInBrowser(url) {
 }
 
 const server = http.createServer((creq, cres) => {
-  if (handleFfbRoute(creq, cres, { port: PORT })) return;
+  if (handleFfbRoute(creq, cres, { port: server.address().port, mode: "static" })) return;
 
   const requestPath = (creq.url || "/").split("?", 1)[0];
   let urlPath;
@@ -154,17 +163,17 @@ const server = http.createServer((creq, cres) => {
 // wall-clock timeout, fail-silent) so no request — including a stale browser
 // tab from a prior run — can be served before the badge state is resolved.
 await ensureVersionChecked();
-server.listen(PORT, "127.0.0.1", () => {
-  const url = "http://127.0.0.1:" + PORT;
+server.listen(PORT, "127.0.0.1", async () => {
+  const url = "http://127.0.0.1:" + server.address().port;
+  await writeSession({ mode: "static", version: PLUGIN_VERSION, url, started_at: new Date().toISOString() }).catch(() => {});
   // Open/advertise the document by its filename, not "/", so location.href
   // carries the name. overlay.js serializes location.href into each Send item,
   // so this is what lets the receiving agent attribute file-mode feedback to
   // the source file (the "/" default document still serves it too).
   const pageUrl = url + "/" + encodeURIComponent(documentName);
-  const inbox = process.env.FFB_INBOX ? resolve(process.env.FFB_INBOX) : join(process.cwd(), ".ffb");
   console.log("fast-feedback static server running:");
   console.log("  " + pageUrl + "  →  " + documentPath);
-  console.log("  inbox: " + inbox);
+  console.log("  inbox: " + inboxPath());
   console.log("  settings project/cwd: " + (process.env.FFB_PROJECT || process.cwd()));
   console.log("Open " + pageUrl + " in your browser. Ctrl+. toggles · overlay hot-read on.");
   if (!process.env.FFB_NO_OPEN) openInBrowser(pageUrl);

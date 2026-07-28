@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, readdir, rmdir, rm, stat, utimes, writeFile }
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { appendItems, count, inboxPath, peek, readAndClear, withLock } from "./inbox.mjs";
+import { appendItems, count, inboxPath, peek, readAndClear, readSession, withLock, writeSession } from "./inbox.mjs";
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -37,6 +37,37 @@ test("inboxPath resolves the configured inbox or the current directory default",
   } finally {
     if (previous === undefined) delete process.env.FFB_INBOX;
     else process.env.FFB_INBOX = previous;
+  }
+});
+
+test("writeSession and readSession use exactly one .ffb directory segment", { concurrency: false }, async () => {
+  const previous = process.env.FFB_INBOX;
+  const root = await mkdtemp(join(tmpdir(), "ffb-session-"));
+  const cwd = process.cwd();
+  try {
+    delete process.env.FFB_INBOX;
+    process.chdir(root);
+    const first = { mode: "static", version: "0.3.0", url: "http://127.0.0.1:5000", started_at: "2026-07-28T12:00:00.000Z" };
+    await writeSession(first);
+    assert.deepEqual(await readSession(), first);
+    assert.equal(inboxPath(), join(root, ".ffb"));
+    assert.equal(await readFile(join(root, ".ffb", "session.json"), "utf8"), JSON.stringify(first));
+    assert.equal(join(root, ".ffb", "session.json").match(/\.ffb/g).length, 1);
+    process.chdir(cwd);
+
+    const configured = join(root, "configured-inbox");
+    process.env.FFB_INBOX = configured;
+    const second = { ...first, mode: "proxy", url: "http://127.0.0.1:5001" };
+    await writeSession(second);
+    assert.deepEqual(await readSession(), second);
+    assert.equal(await readFile(join(configured, "session.json"), "utf8"), JSON.stringify(second));
+    await writeFile(join(configured, "session.json"), "malformed", "utf8");
+    assert.equal(await readSession(), null);
+  } finally {
+    process.chdir(cwd);
+    if (previous === undefined) delete process.env.FFB_INBOX;
+    else process.env.FFB_INBOX = previous;
+    await rm(root, { recursive: true, force: true });
   }
 });
 

@@ -3,7 +3,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
-import { count, inboxPath, peek, readAndClear } from "../scripts/inbox.mjs";
+import { count, inboxPath, peek, readAndClear, readSession } from "../scripts/inbox.mjs";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const DEFAULT_WAIT_TIMEOUT_MS = 100_000;
@@ -54,6 +54,19 @@ function emptyStatusHint(inbox) {
     + "or the server may have been started from a different working directory (set FFB_INBOX to the same absolute path for both).";
 }
 
+async function sessionServerStatus() {
+  const session = await readSession();
+  if (!session) return { state: "none" };
+  try {
+    const response = await fetch(new URL("/__ffb__/ping", session.url), { signal: AbortSignal.timeout(300) });
+    const ping = await response.json();
+    if (response.ok && ping?.ffb === true) {
+      return { state: "running", mode: session.mode, url: session.url, started_at: session.started_at };
+    }
+  } catch {}
+  return { state: "not_responding", mode: session.mode, url: session.url, started_at: session.started_at };
+}
+
 function waitTimeoutMs() {
   const configured = Number(process.env.FFB_WAIT_TIMEOUT_MS);
   if (!Number.isFinite(configured) || configured < 0) return DEFAULT_WAIT_TIMEOUT_MS;
@@ -95,8 +108,9 @@ export async function callTool(name) {
     case "ffb_status": {
       const pending = await count();
       const inbox = inboxPath();
-      const status = { pending, inbox };
-      if (pending === 0) status.hint = emptyStatusHint(inbox);
+      const server = await sessionServerStatus();
+      const status = { pending, inbox, server };
+      if (server.state !== "running") status.hint = emptyStatusHint(inbox);
       return textResult(JSON.stringify(status));
     }
     default:

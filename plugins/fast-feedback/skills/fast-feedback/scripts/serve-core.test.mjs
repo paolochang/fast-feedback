@@ -8,9 +8,9 @@ import test from "node:test";
 const core = await import("./serve-core.mjs");
 const overlayPath = new URL("../assets/overlay.js", import.meta.url);
 
-function request({ port, headers = {}, body }) {
+function request({ port, method = "POST", path = "/__ffb__/send", headers = {}, body }) {
   return new Promise((resolve, reject) => {
-    const request = http.request({ host: "127.0.0.1", port, method: "POST", path: "/__ffb__/send", headers }, (response) => {
+    const request = http.request({ host: "127.0.0.1", port, method, path, headers }, (response) => {
       const chunks = [];
       response.on("data", (chunk) => chunks.push(chunk));
       response.on("end", () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
@@ -49,6 +49,19 @@ test("handleFfbRoute rejects /send without the token", async () => {
       body: "[]",
     });
     assert.equal(response.status, 403);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("handleFfbRoute serves an unauthenticated ping but keeps send token-protected", async () => {
+  const server = await startServer();
+  try {
+    const ping = await request({ port: server.address().port, method: "GET", path: "/__ffb__/ping" });
+    assert.equal(ping.status, 200);
+    assert.deepEqual(JSON.parse(ping.body), { ffb: true, mode: "static" });
+    const send = await request({ port: server.address().port, body: "[]", headers: { "content-type": "application/json" } });
+    assert.equal(send.status, 403);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

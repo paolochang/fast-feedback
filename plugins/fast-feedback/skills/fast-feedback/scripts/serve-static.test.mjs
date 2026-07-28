@@ -110,6 +110,36 @@ test("serves the selected document at / with an injected, uncached UTF-8 boot", 
   });
 });
 
+test("writes a static session marker after binding the server port", async () => {
+  await withStatic({ "mockup.html": "<body>page</body>" }, async ({ file, inbox }) => {
+    const server = await startStatic(file, inbox);
+    try {
+      const marker = JSON.parse(await readFile(join(inbox, "session.json"), "utf8"));
+      assert.deepEqual({ ...marker, started_at: undefined }, {
+        mode: "static",
+        version: "0.3.0",
+        url: "http://127.0.0.1:" + server.port,
+        started_at: undefined,
+      });
+      assert.match(marker.started_at, /^\d{4}-\d{2}-\d{2}T/);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("starts static serving when its session marker cannot be written", async () => {
+  await withStatic({ "mockup.html": "<body>page</body>" }, async ({ file, inbox }) => {
+    await writeFile(inbox, "not a directory", "utf8");
+    const server = await startStatic(file, inbox);
+    try {
+      assert.match(server.output(), /fast-feedback static server running/);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
 test("wraps an HTML fragment with a charset before injecting the boot", async () => {
   await withStatic({ "mockup.html": "<main>café fragment</main>" }, async ({ file, inbox }) => {
     const server = await startStatic(file, inbox);

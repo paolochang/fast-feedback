@@ -1,9 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { parseSession, renderSession } from "./session.mjs";
 
 export function inboxPath() {
   return process.env.FFB_INBOX ? resolve(process.env.FFB_INBOX) : join(process.cwd(), ".ffb");
+}
+
+function sessionPath() {
+  return join(inboxPath(), "session.json");
 }
 
 async function ensureInbox() {
@@ -29,6 +34,20 @@ async function writeAtomically(path, contents) {
   } catch (error) {
     await rm(temporaryPath, { force: true });
     throw error;
+  }
+}
+
+export async function writeSession(session) {
+  const path = sessionPath();
+  await mkdir(inboxPath(), { recursive: true });
+  await writeAtomically(path, renderSession(session));
+}
+
+export async function readSession() {
+  try {
+    return parseSession(await readFile(sessionPath(), "utf8"));
+  } catch {
+    return null;
   }
 }
 
