@@ -28,6 +28,28 @@ function toolCall(name) {
   return handleRequest({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: {} } });
 }
 
+function runStatusProcess(source, environment = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["--input-type=module", "--eval", source], {
+      env: {
+        ...process.env,
+        FFB_INBOX: join(tmpdir(), "ffb-mcp-child-" + process.pid + "-" + Date.now() + "-" + Math.random()),
+        ...environment,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.once("error", reject);
+    child.once("close", (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+const updateCheckUrl = new URL("../scripts/update-check.mjs", import.meta.url).href;
+const serverUrl = new URL("./server.mjs", import.meta.url).href;
+
 test("initialize and tools/list expose the four schemas", async () => {
   const initialized = await handleRequest({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
   const plugin = JSON.parse(await readFile(new URL("../../../.claude-plugin/plugin.json", import.meta.url), "utf8"));
@@ -47,6 +69,100 @@ test("initialize and tools/list expose the four schemas", async () => {
   assert.deepEqual(listed.result.tools.map(({ name }) => name), ["ffb_pull", "ffb_wait", "ffb_peek", "ffb_status"]);
   for (const tool of listed.result.tools) assert.equal(tool.inputSchema.type, "object");
   assert.match(listed.result.tools.find(({ name }) => name === "ffb_status").description, /inbox/);
+});
+
+test("ffb_status includes the current version before its lazy update check completes", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+    const plugin = JSON.parse(await readFile(new URL("../../../.claude-plugin/plugin.json", import.meta.url), "utf8"));
+    assert.deepEqual(status.version, { current: plugin.version, latest: null, outdated: false });
+  });
+});
+
+test("ffb_status reports the cached latest version", { concurrency: false }, async () => {
+  const plugin = JSON.parse(await readFile(new URL("../../../.claude-plugin/plugin.json", import.meta.url), "utf8"));
+  const child = await runStatusProcess(`
+    import { ensureVersionChecked } from ${JSON.stringify(updateCheckUrl)};
+    await ensureVersionChecked({ fetchImpl: async () => '{"plugins":[{"name":"fast-feedback","version":"0.3.1"}]}' });
+    const { callTool } = await import(${JSON.stringify(serverUrl)});
+    process.stdout.write(JSON.stringify(await callTool("ffb_status")));
+  `);
+  assert.equal(child.code, 0, child.stderr);
+  assert.deepEqual(JSON.parse(JSON.parse(child.stdout).content[0].text).version, {
+    current: plugin.version,
+    latest: "0.3.1",
+    outdated: true,
+  });
+});
+
+test("ffb_status returns a valid version payload after a rejected update check", { concurrency: false }, async () => {
+  const plugin = JSON.parse(await readFile(new URL("../../../.claude-plugin/plugin.json", import.meta.url), "utf8"));
+  const child = await runStatusProcess(`
+    import { ensureVersionChecked } from ${JSON.stringify(updateCheckUrl)};
+    await ensureVersionChecked({ fetchImpl: async () => { throw new Error("offline"); } });
+    const { callTool } = await import(${JSON.stringify(serverUrl)});
+    process.stdout.write(JSON.stringify(await callTool("ffb_status")));
+  `);
+  assert.equal(child.code, 0, child.stderr);
+  const reply = JSON.parse(child.stdout);
+  assert.equal(reply.isError, false);
+  assert.deepEqual(JSON.parse(reply.content[0].text).version, {
+    current: plugin.version,
+    latest: null,
+    outdated: false,
+  });
+});
+
+test("ffb_status does not wait for an in-flight update check", { concurrency: false }, async () => {
+  const plugin = JSON.parse(await readFile(new URL("../../../.claude-plugin/plugin.json", import.meta.url), "utf8"));
+  const child = await runStatusProcess(`
+    import { ensureVersionChecked } from ${JSON.stringify(updateCheckUrl)};
+    ensureVersionChecked({ fetchImpl: () => new Promise(() => {}) });
+    const { callTool } = await import(${JSON.stringify(serverUrl)});
+    process.stdout.write(JSON.stringify(await callTool("ffb_status")));
+  `);
+  assert.equal(child.code, 0, child.stderr);
+  const reply = JSON.parse(child.stdout);
+  assert.equal(reply.isError, false);
+  assert.deepEqual(JSON.parse(reply.content[0].text).version, {
+    current: plugin.version,
+    latest: null,
+    outdated: false,
+  });
+});
+
+test("ffb_status skips the update check when FFB_NO_UPDATE_CHECK is set", { concurrency: false }, async () => {
+  const child = await runStatusProcess(`
+    import { ensureVersionChecked } from ${JSON.stringify(updateCheckUrl)};
+    const { callTool } = await import(${JSON.stringify(serverUrl)});
+    const reply = await callTool("ffb_status");
+    let fetches = 0;
+    await ensureVersionChecked({ fetchImpl: async () => { fetches += 1; return '{"plugins":[]}'; } });
+    process.stdout.write(JSON.stringify({ reply, fetches }));
+  `, { FFB_NO_UPDATE_CHECK: "1" });
+  assert.equal(child.code, 0, child.stderr);
+  const { reply, fetches } = JSON.parse(child.stdout);
+  assert.equal(reply.isError, false);
+  assert.ok(JSON.parse(reply.content[0].text).version);
+  assert.equal(fetches, 1);
+});
+
+// Guards the "fire, don't await" contract. ensureVersionChecked memoises, so the
+// server's own call returns this same never-settling promise. If ffb_status ever
+// grows an `await` in front of it, the child's top-level await never settles and
+// node exits 13 (ERR_UNSETTLED_TOP_LEVEL_AWAIT) having written nothing — so a
+// regression fails loudly here instead of silently adding up to 3s to every call.
+test("ffb_status returns without waiting for the update check to settle", { concurrency: false, timeout: 20000 }, async () => {
+  const child = await runStatusProcess(`
+    import { ensureVersionChecked } from ${JSON.stringify(updateCheckUrl)};
+    ensureVersionChecked({ fetchImpl: () => new Promise(() => {}) });
+    const { callTool } = await import(${JSON.stringify(serverUrl)});
+    process.stdout.write(JSON.stringify(await callTool("ffb_status")));
+  `);
+  assert.equal(child.code, 0, "ffb_status did not return while the update check was pending: " + child.stderr);
+  const status = JSON.parse(JSON.parse(child.stdout).content[0].text);
+  assert.equal(status.version.latest, null);
+  assert.equal(status.version.outdated, false);
 });
 
 test("pull clears feedback while peek and status preserve it", { concurrency: false }, async () => {
@@ -73,7 +189,7 @@ test("pull clears feedback while peek and status preserve it", { concurrency: fa
       items,
     );
     const emptyStatus = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
-    assert.deepEqual(Object.keys(emptyStatus), ["pending", "inbox", "server", "hint"]);
+    assert.deepEqual(Object.keys(emptyStatus), ["pending", "inbox", "server", "version", "hint"]);
     assert.equal(emptyStatus.pending, 0);
     assert.equal(emptyStatus.inbox, inbox);
     assert.match(emptyStatus.hint, /No pending feedback at the inbox this MCP reads/);

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
 import { count, inboxPath, peek, readAndClear, readSession } from "../scripts/inbox.mjs";
+import { currentLatest, ensureVersionChecked, versionInfo } from "../scripts/update-check.mjs";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const DEFAULT_WAIT_TIMEOUT_MS = 100_000;
@@ -106,10 +107,12 @@ export async function callTool(name) {
       return textResult(items.length ? JSON.stringify(items) : "[]\n" + EMPTY_RESULT_POINTER);
     }
     case "ffb_status": {
+      if (!process.env.FFB_NO_UPDATE_CHECK) ensureVersionChecked();
+      const version = versionInfo(SERVER_VERSION, currentLatest());
       const pending = await count();
       const inbox = inboxPath();
       const server = await sessionServerStatus();
-      const status = { pending, inbox, server };
+      const status = { pending, inbox, server, version };
       if (server.state !== "running") status.hint = emptyStatusHint(inbox);
       return textResult(JSON.stringify(status));
     }
