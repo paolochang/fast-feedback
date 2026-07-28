@@ -63,6 +63,7 @@
     // shared floating card (form + panel)
     '.__ffb_form,.__ffb_panel{position:fixed;z-index:2147483646;background:var(--__ffb_surf);border:1px solid var(--__ffb_line);border-radius:10px;box-shadow:0 10px 34px var(--__ffb_shadow);color:var(--__ffb_ink);display:none;flex-direction:column;overflow:hidden}',
     '.__ffb_form.open,.__ffb_panel.open{display:flex}',
+    '.__ffb_panel.__ffb_hidearm{display:none}',
     '.__ffb_hd{display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--__ffb_head);border-bottom:1px solid var(--__ffb_line);cursor:move;user-select:none}',
     '.__ffb_hd .__ffb_ttl{font-size:12px;font-weight:700;color:var(--__ffb_gold);flex:1}',
     '.__ffb_hd .__ffb_x{cursor:pointer;background:none;border:none;color:var(--__ffb_mut);font-size:14px;line-height:1;padding:2px 4px}',
@@ -97,6 +98,7 @@
     '.__ffb_item:hover .__ffb_tools{display:flex}',
     '.__ffb_ic{width:22px;height:22px;border-radius:6px;border:1px solid var(--__ffb_line);background:var(--__ffb_surf);color:var(--__ffb_ink);font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}',
     '.__ffb_ic:hover{border-color:var(--__ffb_gold)}',
+    '.__ffb_ic.__ffb_del:hover{color:var(--__ffb_warn);border-color:var(--__ffb_warn)}',
     '.__ffb_item textarea{box-sizing:border-box;width:100%;background:var(--__ffb_field);color:var(--__ffb_ink);border:1px solid var(--__ffb_line);border-radius:6px;padding:6px 8px;font-size:13px;font-family:inherit;resize:vertical;min-height:52px}',
     '.__ffb_item .__ffb_iact{display:flex;gap:6px;justify-content:flex-end;margin-top:6px}',
     '.__ffb_hist{display:flex;gap:9px}',
@@ -358,10 +360,11 @@
   // and the Write arm/disarm (setActive) go through it, so neither can clobber
   // the other — setEnabled(false) calls setActive(false) on its way out, and a
   // second independent writer there would re-show the bar it just hid.
-  // The bar hides while Write is armed so the band beneath it can be annotated.
+  // The bar and panel hide while Write is armed so the page can be annotated.
   function syncBarVisibility() {
     bar.style.display = enabled && !active ? "flex" : "none";
     arm.classList.toggle("on", enabled && active);
+    panel.classList.toggle("__ffb_hidearm", enabled && active);
   }
 
   // "Write" arms the highlight cursor. It's NOT a sticky toggle: after one box
@@ -1582,11 +1585,17 @@
   window.addEventListener("keydown", function (e) {
     if (settingsOpen) { if (e.key === "Escape" && !capturing) { e.preventDefault(); closeSettings(); } return; } // settings owns the keyboard
     if (capturing) return;
+    var typing = /^(input|textarea|select)$/i.test((e.target && e.target.tagName) || "") || (e.target && e.target.isContentEditable);
     // Esc disarms Write when it's armed and no annotation form is open.
     if (e.key === "Escape" && active && !form.classList.contains("open")) { e.preventDefault(); setActive(false); return; }
+    // Esc then closes the list, but only when nothing nearer owns the key: the
+    // annotation form, a confirm dialog, an inline note edit, or any field being
+    // typed in. The inline-edit textarea handles Esc itself but doesn't stop
+    // propagation, so `typing` is what keeps one Esc from cancelling the edit
+    // AND closing the list out from under it.
+    if (e.key === "Escape" && panel.classList.contains("open") && !form.classList.contains("open") && !confirmEl.classList.contains("open") && editingN === null && !typing) { e.preventDefault(); closeList(); return; }
     var ctrl = e.ctrlKey || e.metaKey;
     if (!ctrl && !e.altKey && !e.shiftKey) return; // ignore plain keys
-    var typing = /^(input|textarea|select)$/i.test((e.target && e.target.tagName) || "") || (e.target && e.target.isContentEditable);
     for (var i = 0; i < HK_ORDER.length; i++) {
       var action = HK_ORDER[i][0], b = hotkeys[action];
       if (ctrl === b.ctrl && e.altKey === b.alt && e.shiftKey === b.shift && e.code === b.code) {
