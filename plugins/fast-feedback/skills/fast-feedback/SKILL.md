@@ -165,16 +165,23 @@ shortcut — the current combo is in each button's
 user:
 - arms the highlight cursor — **Write** button or **Ctrl+/**. It's one-shot:
   after drawing one box it disarms, so no stray crosshair is left on. Pressing
-  **Esc** while it's armed disarms it too.
+  **Esc** while it's armed disarms it too. While it's armed the strip is gone,
+  so a small **"Write mode"** chip appears at the bottom-centre to say the
+  cursor is live and that **Esc** cancels; it disappears the moment you disarm.
+  An open feedback list hides along with the strip and comes back exactly as it
+  was — same scroll position, same place on screen — once you're done drawing.
 - **drags a box** over any part; a **draggable form pops up at that box**,
 - writes the fix and clicks **Submit** (or **Ctrl+Enter**) → the box is committed
   with a number and the list count goes up. Closing an unsaved box asks before
   discarding, so nothing is lost by accident.
 - opens the list — **List** button or **Ctrl+[** — titled **Feedback (n)**, where
-  each note shows as read-only text. Hovering a note reveals **✎ edit** and
-  **🗑 delete** (top-right of the card); a committed box also has a **🗑 on its
-  top-right corner**. Editing is inline; closing a changed edit asks before
-  reverting. Deleting asks first (**Cancel / Discard**).
+  each note shows as read-only text. **Esc** closes it, unless something nearer
+  owns the key (an open form, a confirm, or a note you're editing). Hovering a
+  note reveals **✎ edit** and **🗑 delete** (top-right of the card) — delete
+  turns red on hover so the destructive one is obvious before you click it;
+  a committed box also has a **🗑 on its top-right corner**.
+  Editing is inline; closing a changed edit asks before reverting. Deleting
+  asks first (**Cancel / Discard**).
 - the list header also has **Copy** and **Clear** — Clear wipes every note after a
   confirm (**Cancel / Clear**) and restarts numbering at [1].
 - copies everything — **Copy All** button or **Ctrl+'** — and pastes it back.
@@ -223,7 +230,7 @@ write route); in console/bookmarklet mode changes persist via `localStorage` for
 that page.
 
 Hotkeys (defaults — all rebindable in ⚙): **Ctrl+.** show/hide · **Ctrl+/**
-annotate (**Esc** disarms) · **Ctrl+[** list · **Ctrl+'** copy · **Ctrl+;**
+annotate (**Esc** disarms) · **Ctrl+[** list (**Esc** closes) · **Ctrl+'** copy · **Ctrl+;**
 screenshot · **Ctrl+Backslash** Send · in a form **Ctrl+Enter** submit / **Esc** cancel.
 
 ## Feedback format you will receive
