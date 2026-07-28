@@ -62,7 +62,8 @@ overlay runs *same-origin* with the app: full DOM access, no iframe.
    auto-open (headless/CI). Run this command from the **project root** so the
    static server and MCP server share `<project-root>/.ffb/`; if they must use
    different working directories, set `FFB_INBOX` to the same absolute inbox
-   path for both.
+   path for both. Set `FFB_NO_UPDATE_CHECK=1` to disable the MCP server's
+   update check.
    The server serves the mockup's own directory, so assets should be at or below it; `../parent` assets will not resolve.
 3. **Tell the user to annotate** (see *Annotating* below), then use **Send to
    AI** to deliver new annotations to the MCP server. Settings write-back and
@@ -114,10 +115,10 @@ running just adds a wrapper on a new port.
 
 In served file or live/proxy mode, the overlay's **Send to AI** button (default hotkey:
 **Ctrl+Backslash**) sends new annotations to the local inbox for the MCP server. Use it
-after submitting the notes you want applied. **Copy All** (default **Ctrl+'**)
-remains the universal fallback for console/bookmarklet mode, non-MCP clients,
-human reviewers, and web chat: paste the copied feedback into the conversation
-as usual.
+after submitting the notes you want applied. **Copy All** (default **Ctrl+'**) is
+the only path to the AI in console/bookmarklet mode, and is also available for
+non-MCP clients, human reviewers, and web chat: paste the copied feedback into
+the conversation as usual.
 
 Claude Code auto-registers the Fast Feedback MCP server when this plugin is
 installed. It provides four tools:
@@ -125,7 +126,12 @@ installed. It provides four tools:
 - `ffb_pull` reads and clears all pending feedback.
 - `ffb_wait` waits for feedback, then reads and clears it.
 - `ffb_peek` reads pending feedback without clearing it.
-- `ffb_status` returns the number of pending items.
+- `ffb_status` returns JSON with `pending` (the number of pending items),
+  `inbox` (the absolute inbox path), `server`, and `version`. `server` is an
+  object whose `state` is `none`, `running`, or `not_responding`; when a server
+  marker exists, it also includes `mode`, `url`, and `started_at`. `version` is
+  `{ current, latest, outdated }`. A `hint` is included when the server is not
+  running.
 
 For the **watch loop** (review mode), call `ffb_wait`, apply the returned
 feedback, then call `ffb_wait` again to re-arm it. For clients that do not support
@@ -133,11 +139,20 @@ long-polling, call `ffb_pull` once when the user says they sent feedback. Codex
 and Cursor need a one-time `mcp add` registration for this server; they do not
 need to add it for each use.
 
+When `ffb_peek`, `ffb_pull`, or `ffb_wait` returns empty, call `ffb_status` to
+diagnose the server and inbox being read. Their non-empty output is unchanged.
+When empty, `ffb_peek` returns `[]` on the first line followed by a pointer to
+`ffb_status`, so the full response is no longer JSON-parseable. `ffb_pull` and
+`ffb_wait` retain `no pending feedback` and `none yet` respectively, with the
+same pointer appended.
+
 Limits (be honest): the proxy is built for **local dev servers** you're working
 on. An **https** dev server needs a local cert — start it on http for the review,
 or fall back to the snippet below. Rare HMR setups that hard-code the client
 port may need a one-line dev-config tweak. It is not meant to wrap arbitrary
-third-party/production sites (auth cookies, service workers, strict CSP).
+third-party/production sites (auth cookies, service workers, strict CSP). In
+console/bookmarklet mode, **Send to AI cannot reach the AI** because there is no
+server to receive it; **Copy All** is the only path to the AI.
 
 ## Live mode — console / bookmarklet (fallback)
 
@@ -153,6 +168,9 @@ Writes `fast-feedback.snippet.js` (console) and
 clipboard**. Tell the user: open the app tab → **F12 → Console** → **paste
 (Ctrl+V)** → Enter. (Bookmarklet alternative exists but is large now that
 `html2canvas` is inlined — prefer the console.) Then annotate as below.
+The action button is labelled **Archive locally**. **Send to AI does not work in
+this mode:** there is no server to receive it. The button archives to History;
+use **Copy All** to get the feedback to the AI.
 
 ## Annotating (both modes)
 
