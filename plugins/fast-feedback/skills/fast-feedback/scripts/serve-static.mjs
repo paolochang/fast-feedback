@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { createReadStream, readFileSync, statSync } from "node:fs";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { handleFfbRoute, injectBoot, renderBoot } from "./serve-core.mjs";
+import { ensureVersionChecked } from "./update-check.mjs";
 
 const argv = process.argv.slice(2);
 const portIndex = argv.indexOf("--port");
@@ -149,6 +150,10 @@ const server = http.createServer((creq, cres) => {
   });
 });
 
+// Run the version check before opening the port (bounded to ~3s by the
+// wall-clock timeout, fail-silent) so no request — including a stale browser
+// tab from a prior run — can be served before the badge state is resolved.
+await ensureVersionChecked();
 server.listen(PORT, "127.0.0.1", () => {
   const url = "http://127.0.0.1:" + PORT;
   // Open/advertise the document by its filename, not "/", so location.href

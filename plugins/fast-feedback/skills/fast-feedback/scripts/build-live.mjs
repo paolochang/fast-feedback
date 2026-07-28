@@ -17,7 +17,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { bootAssignments } from "./settings.mjs";
+import { bootAssignments, ensureVersionChecked } from "./settings.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // Inline the vendored html2canvas (MIT) AHEAD of the engine so the Screenshot
@@ -28,6 +28,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 // Console mode has no server, so there's no write-back — changes persist via
 // localStorage only.
 const h2c = readFileSync(join(here, "..", "assets", "html2canvas.min.js"), "utf8");
+await ensureVersionChecked();
 const boot = bootAssignments();
 const engine = h2c + "\n" + boot + "\n" + readFileSync(join(here, "..", "assets", "overlay.js"), "utf8");
 

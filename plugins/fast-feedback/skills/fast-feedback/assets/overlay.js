@@ -135,6 +135,10 @@
     '.__ffb_segbtn{border-radius:6px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;border:1px solid var(--__ffb_line);background:var(--__ffb_field);color:var(--__ffb_ink)}',
     '.__ffb_segbtn.sel{background:var(--__ffb_gold);color:var(--__ffb_onaccent);border-color:var(--__ffb_gold)}',
     '.__ffb_srow_sep{border-top:1px solid var(--__ffb_line);margin:3px 0 1px}',
+    '.__ffb_version{flex-direction:column;align-items:flex-start;gap:5px}',
+    '.__ffb_versionline{font-size:12px;color:var(--__ffb_mut)}',
+    '.__ffb_versionbadge{background:var(--__ffb_gold);color:var(--__ffb_onaccent);border-radius:999px;padding:2px 7px;font-size:11px;font-weight:700}',
+    '.__ffb_versioncommands{white-space:pre-line;font-size:11.5px;color:var(--__ffb_mut)}',
     '.__ffb_keybtn{min-width:132px;text-align:center;border-radius:7px;padding:5px 10px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;border:1px solid var(--__ffb_line);background:var(--__ffb_field);color:var(--__ffb_ink);font-variant-numeric:tabular-nums}',
     '.__ffb_keybtn:hover{border-color:var(--__ffb_gold)}',
     '.__ffb_keybtn.listening{border-color:var(--__ffb_gold);color:var(--__ffb_gold);background:var(--__ffb_listen)}',
@@ -1438,6 +1442,33 @@
       row.querySelector(".__ffb_keybtn").onclick = function () { startCapture(action, this); };
       srows.appendChild(row);
     });
+
+    var version = window.__FFB_VERSION;
+    if (typeof version === "string" && version) {
+      var sep3 = document.createElement("div");
+      sep3.className = "__ffb_srow_sep";
+      srows.appendChild(sep3);
+
+      var vrow = document.createElement("div");
+      vrow.className = "__ffb_srow __ffb_version";
+      var vline = document.createElement("div");
+      vline.className = "__ffb_versionline";
+      vline.textContent = "Fast Feedback v" + version;
+      vrow.appendChild(vline);
+
+      var latest = window.__FFB_LATEST;
+      if (window.__FFB_OUTDATED === true && typeof latest === "string") {
+        var badge = document.createElement("div");
+        badge.className = "__ffb_versionbadge";
+        badge.textContent = "update available → v" + latest;
+        var commands = document.createElement("div");
+        commands.className = "__ffb_versioncommands";
+        commands.textContent = "/plugin marketplace update fast-feedback\n/plugin update fast-feedback@fast-feedback\n/reload-plugins";
+        vrow.appendChild(badge);
+        vrow.appendChild(commands);
+      }
+      srows.appendChild(vrow);
+    }
   }
   function stopCapture() {
     capturing = null;
