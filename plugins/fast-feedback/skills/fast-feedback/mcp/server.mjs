@@ -3,7 +3,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
-import { count, peek, readAndClear } from "../scripts/inbox.mjs";
+import { count, inboxPath, peek, readAndClear } from "../scripts/inbox.mjs";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const DEFAULT_WAIT_TIMEOUT_MS = 100_000;
@@ -37,13 +37,21 @@ export const toolDefinitions = [
   },
   {
     name: "ffb_status",
-    description: "Return the number of pending Fast Feedback items.",
+    description: "Return the pending feedback count and inbox path being read.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
 ];
 
 function textResult(text, isError = false) {
   return { content: [{ type: "text", text }], isError };
+}
+
+const EMPTY_RESULT_POINTER = " — call ffb_status to see whether a server is running and which inbox is being read.";
+
+function emptyStatusHint(inbox) {
+  return "No pending feedback at the inbox this MCP reads (`" + inbox + "`). If the user says they pressed Send: "
+    + "the page may be in console/bookmarklet mode (Send cannot reach the inbox there — ask for Copy All), "
+    + "or the server may have been started from a different working directory (set FFB_INBOX to the same absolute path for both).";
 }
 
 function waitTimeoutMs() {
@@ -74,16 +82,23 @@ export async function callTool(name) {
   switch (name) {
     case "ffb_pull": {
       const items = await readAndClear();
-      return textResult(items.length ? JSON.stringify(items) : "no pending feedback");
+      return textResult(items.length ? JSON.stringify(items) : "no pending feedback" + EMPTY_RESULT_POINTER);
     }
     case "ffb_wait": {
       const items = await waitForFeedback();
-      return textResult(items ? JSON.stringify(items) : "none yet");
+      return textResult(items ? JSON.stringify(items) : "none yet" + EMPTY_RESULT_POINTER);
     }
-    case "ffb_peek":
-      return textResult(JSON.stringify(await peek()));
-    case "ffb_status":
-      return textResult(String(await count()));
+    case "ffb_peek": {
+      const items = await peek();
+      return textResult(items.length ? JSON.stringify(items) : "[]\n" + EMPTY_RESULT_POINTER);
+    }
+    case "ffb_status": {
+      const pending = await count();
+      const inbox = inboxPath();
+      const status = { pending, inbox };
+      if (pending === 0) status.hint = emptyStatusHint(inbox);
+      return textResult(JSON.stringify(status));
+    }
     default:
       return textResult("Unknown tool: " + String(name), true);
   }

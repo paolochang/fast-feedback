@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, readdir, rmdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
-import { appendItems, count, peek, readAndClear, withLock } from "./inbox.mjs";
+import { appendItems, count, inboxPath, peek, readAndClear, withLock } from "./inbox.mjs";
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -25,6 +25,20 @@ async function assertMirrorMatchesSpool(dir) {
   const mirror = jsonl.trim() ? jsonl.trim().split("\n").map((line) => JSON.parse(line)) : [];
   assert.deepEqual(mirror, await peek());
 }
+
+test("inboxPath resolves the configured inbox or the current directory default", { concurrency: false }, () => {
+  const previous = process.env.FFB_INBOX;
+  try {
+    delete process.env.FFB_INBOX;
+    assert.equal(inboxPath(), join(process.cwd(), ".ffb"));
+
+    process.env.FFB_INBOX = "feedback-inbox";
+    assert.equal(inboxPath(), resolve("feedback-inbox"));
+  } finally {
+    if (previous === undefined) delete process.env.FFB_INBOX;
+    else process.env.FFB_INBOX = previous;
+  }
+});
 
 test("appendItems atomically spools every item and regenerates both mirrors", async () => {
   await withInbox(async (dir) => {

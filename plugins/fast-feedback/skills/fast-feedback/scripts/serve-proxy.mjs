@@ -23,6 +23,7 @@
 
 import http from "node:http";
 import net from "node:net";
+import { inboxPath } from "./inbox.mjs";
 import { isLoopbackHost } from "./proxy-guards.mjs";
 import { FFB_SEND_TOKEN, STRIP, handleFfbRoute, injectBoot, renderBoot } from "./serve-core.mjs";
 import { ensureVersionChecked } from "./update-check.mjs";
@@ -116,6 +117,7 @@ server.on("upgrade", function (creq, csocket, head) {
 await ensureVersionChecked();
 server.listen(PORT, "127.0.0.1", function () {
   console.log("fast-feedback proxy running:");
+  console.log("  inbox: " + inboxPath());
   console.log("  http://localhost:" + PORT + "  →  " + target);
   console.log("");
   console.log("Open http://localhost:" + PORT + " in your browser (instead of " + target + ").");

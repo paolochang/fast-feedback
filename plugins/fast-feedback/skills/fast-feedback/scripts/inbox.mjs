@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-function inboxDir() {
+export function inboxPath() {
   return process.env.FFB_INBOX ? resolve(process.env.FFB_INBOX) : join(process.cwd(), ".ffb");
 }
 
 async function ensureInbox() {
-  const dir = inboxDir();
+  const dir = inboxPath();
   const pendingDir = join(dir, "pending");
   await mkdir(pendingDir, { recursive: true });
   return { dir, pendingDir };

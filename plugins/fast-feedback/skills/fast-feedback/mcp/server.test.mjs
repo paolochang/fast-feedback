@@ -45,25 +45,44 @@ test("initialize and tools/list expose the four schemas", async () => {
   assert.deepEqual(listed.result.tools, toolDefinitions);
   assert.deepEqual(listed.result.tools.map(({ name }) => name), ["ffb_pull", "ffb_wait", "ffb_peek", "ffb_status"]);
   for (const tool of listed.result.tools) assert.equal(tool.inputSchema.type, "object");
+  assert.match(listed.result.tools.find(({ name }) => name === "ffb_status").description, /inbox/);
 });
 
 test("pull clears feedback while peek and status preserve it", { concurrency: false }, async () => {
-  await withInbox(async () => {
+  await withInbox(async (inbox) => {
     const items = [{ n: 1, comment: "first" }, { n: 2, comment: "second" }];
     await appendItems(items);
 
-    assert.equal((await toolCall("ffb_status")).result.content[0].text, "2");
+    assert.deepEqual(JSON.parse((await toolCall("ffb_status")).result.content[0].text), {
+      pending: 2,
+      inbox,
+    });
     assert.deepEqual(
       JSON.parse((await toolCall("ffb_peek")).result.content[0].text).map(({ id, ...item }) => item).sort((left, right) => left.n - right.n),
       items,
     );
-    assert.equal((await toolCall("ffb_status")).result.content[0].text, "2");
+    assert.deepEqual(JSON.parse((await toolCall("ffb_status")).result.content[0].text), {
+      pending: 2,
+      inbox,
+    });
     assert.deepEqual(
       JSON.parse((await toolCall("ffb_pull")).result.content[0].text).map(({ id, ...item }) => item).sort((left, right) => left.n - right.n),
       items,
     );
-    assert.equal((await toolCall("ffb_status")).result.content[0].text, "0");
-    assert.equal((await toolCall("ffb_pull")).result.content[0].text, "no pending feedback");
+    const emptyStatus = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+    assert.deepEqual(Object.keys(emptyStatus), ["pending", "inbox", "hint"]);
+    assert.equal(emptyStatus.pending, 0);
+    assert.equal(emptyStatus.inbox, inbox);
+    assert.match(emptyStatus.hint, /No pending feedback at the inbox this MCP reads/);
+    assert.match(emptyStatus.hint, new RegExp(inbox.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+
+    const emptyPull = (await toolCall("ffb_pull")).result.content[0].text;
+    assert.match(emptyPull, /^no pending feedback — call ffb_status to see whether a server is running and which inbox is being read\.$/);
+
+    const emptyPeek = (await toolCall("ffb_peek")).result.content[0].text;
+    const [emptyPeekJson, emptyPeekPointer] = emptyPeek.split("\n");
+    assert.deepEqual(JSON.parse(emptyPeekJson), []);
+    assert.equal(emptyPeekPointer, " — call ffb_status to see whether a server is running and which inbox is being read.");
   });
 });
 
@@ -72,7 +91,10 @@ test("wait returns new feedback promptly and reports a short timeout", { concurr
     const previousTimeout = process.env.FFB_WAIT_TIMEOUT_MS;
     process.env.FFB_WAIT_TIMEOUT_MS = "25";
     try {
-      assert.equal((await toolCall("ffb_wait")).result.content[0].text, "none yet");
+      assert.match(
+        (await toolCall("ffb_wait")).result.content[0].text,
+        /^none yet — call ffb_status to see whether a server is running and which inbox is being read\.$/,
+      );
     } finally {
       if (previousTimeout === undefined) delete process.env.FFB_WAIT_TIMEOUT_MS;
       else process.env.FFB_WAIT_TIMEOUT_MS = previousTimeout;
