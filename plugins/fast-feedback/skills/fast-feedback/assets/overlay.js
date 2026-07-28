@@ -674,7 +674,12 @@
     lightbox.appendChild(close);
     lightbox.appendChild(shot);
     root.appendChild(lightbox);
-    var onKeydown = function (event) { if (event.key === "Escape") closeHistoryLightbox(); };
+    // The lightbox owns Esc while it is open, so stop the event here: it would
+    // otherwise keep bubbling to the window handler, which closes the list — and
+    // that would drop the history detail view the lightbox was opened from. A
+    // guard on the window side can't do this, because this listener has already
+    // cleared historyLightbox by the time the event gets there.
+    var onKeydown = function (event) { if (event.key === "Escape") { event.stopPropagation(); closeHistoryLightbox(); } };
     historyLightbox = { el: lightbox, onKeydown: onKeydown };
     close.onclick = closeHistoryLightbox;
     lightbox.onclick = function (event) { if (event.target === lightbox) closeHistoryLightbox(); };
