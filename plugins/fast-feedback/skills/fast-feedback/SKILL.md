@@ -156,10 +156,11 @@ clipboard**. Tell the user: open the app tab → **F12 → Console** → **paste
 
 ## Annotating (both modes)
 
-A top strip appears at the very top of the page (the app is pushed down so the
-strip never overlaps its header): left shows `🖍 Feedback` + the file name,
-right shows the **Write / List / Copy All / Screenshot / ⚙** buttons. Button
-labels don't print their shortcut — the current combo is in each button's
+A top strip overlays the very top of the page without changing its layout or
+scroll height. It hides while Write is armed so the area beneath it can be
+annotated: left shows `🖍 Feedback` + the file name, right shows the **Write /
+List / Copy All / Screenshot / ⚙** buttons. Button labels don't print their
+shortcut — the current combo is in each button's
 **tooltip** (hover), kept in sync with whatever the shortcut is bound to. The
 user:
 - arms the highlight cursor — **Write** button or **Ctrl+/**. It's one-shot:
@@ -191,10 +192,10 @@ user:
   there is no server, so a "saved" shot downloads to the browser's Downloads
   folder instead.
 
-- shows/hides the **whole overlay** with **Ctrl+.** — the bar, boxes and top
-  spacer all disappear and the page behaves normally, so it stays out of the way
-  when you're just using the app. The choice is remembered (localStorage) across
-  reloads, which matters when it's always injected (e.g. via the dev proxy).
+- shows/hides the **whole overlay** with **Ctrl+.** — the bar and boxes
+  disappear, while the page behaves normally at all times, so it stays out of
+  the way when you're just using the app. The choice is remembered (localStorage)
+  across reloads, which matters when it's always injected (e.g. via the dev proxy).
 - opens **⚙ Settings** (a centered, non-draggable popup) for **theme**,
   **highlight color**, **screenshots**, and **hotkeys**:
   - **Theme** — Light / Dark, saved **per project** (keyed by the project's path)

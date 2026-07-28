@@ -26,7 +26,7 @@
   if (window.__ffb_loaded) { if (window.__ffb_show) window.__ffb_show(); return; }
   window.__ffb_loaded = true;
 
-  var BAR_H = 40; // top strip height; the page is pushed down by this much.
+  var BAR_H = 40; // top strip height.
   // Colors are CSS custom properties so the whole overlay can flip light/dark by
   // toggling one class (__ffb_light) on <html>. The annotation-box gold and the
   // dark-text-on-gold (#1a1300) are theme-invariant on purpose — the box is a
@@ -968,11 +968,11 @@
   // copy tied to the button's user-gesture while the render finishes. If the
   // clipboard is blocked (permissions / not focused / unsupported, e.g. over
   // file://) we fall back to downloading the PNG so the shot is never lost.
-  // Serialize captures: capturePng mutates shared DOM state (hides chrome,
-  // removes the body spacer) and restores it on completion. Two overlapping
-  // captures — e.g. the Screenshot hotkey pressed during the Send flush's
-  // parallel capture — would each snapshot the OTHER's temporary state as the
-  // "original" and restore to it, leaving the overlay hidden / spacer removed.
+  // Serialize captures: capturePng mutates shared DOM state (it hides the
+  // chrome) and restores it on completion. Two overlapping captures — e.g. the
+  // Screenshot hotkey pressed during the Send flush's parallel capture — would
+  // each snapshot the OTHER's temporary state as the "original" and restore to
+  // it, leaving the overlay hidden.
   // Chain each capture after the previous one fully settles so they never overlap.
   var captureChain = Promise.resolve();
   var capturesInFlight = 0;   // running OR queued; Send bails if a capture is active (see sendToAI)
