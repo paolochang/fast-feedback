@@ -936,7 +936,7 @@
     var capturePromise = capturePng(true);
     capturePromise.catch(function () {});   // send-fail paths discard it; avoid an unhandled rejection
     Promise.resolve(request).then(function () {
-      if (canSend && toSend.length) {
+      if (canSend) {
         sentToInbox = true;
         // Only mark the revision we actually sent as delivered. If the user edited
         // this annotation while the send was in flight (edit resets sentToInbox to

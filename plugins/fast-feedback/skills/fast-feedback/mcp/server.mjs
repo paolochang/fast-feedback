@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
 import { count, inboxPath, peek, readAndClear, readSession } from "../scripts/inbox.mjs";
+import { isLoopbackHost } from "../scripts/proxy-guards.mjs";
 import { currentLatest, ensureVersionChecked, versionInfo } from "../scripts/update-check.mjs";
 
 const PROTOCOL_VERSION = "2024-11-05";
@@ -50,7 +51,7 @@ function textResult(text, isError = false) {
 const EMPTY_RESULT_POINTER = " — call ffb_status to see whether a server is running and which inbox is being read.";
 
 function emptyStatusHint(inbox) {
-  return "No pending feedback at the inbox this MCP reads (`" + inbox + "`). If the user says they pressed Send: "
+  return "No ffb server is answering at the inbox this MCP reads (`" + inbox + "`). Check: "
     + "the page may be in console/bookmarklet mode (Send cannot reach the inbox there — ask for Copy All), "
     + "or the server may have been started from a different working directory (set FFB_INBOX to the same absolute path for both).";
 }
@@ -58,8 +59,17 @@ function emptyStatusHint(inbox) {
 async function sessionServerStatus() {
   const session = await readSession();
   if (!session) return { state: "none" };
+  let sessionUrl;
   try {
-    const response = await fetch(new URL("/__ffb__/ping", session.url), { signal: AbortSignal.timeout(300) });
+    sessionUrl = new URL(session.url);
+  } catch {
+    return { state: "not_responding", mode: session.mode, url: session.url, started_at: session.started_at };
+  }
+  if (!isLoopbackHost(sessionUrl.hostname)) {
+    return { state: "not_responding", mode: session.mode, url: session.url, started_at: session.started_at };
+  }
+  try {
+    const response = await fetch(new URL("/__ffb__/ping", sessionUrl), { signal: AbortSignal.timeout(300) });
     const ping = await response.json();
     if (response.ok && ping?.ffb === true) {
       return { state: "running", mode: session.mode, url: session.url, started_at: session.started_at };

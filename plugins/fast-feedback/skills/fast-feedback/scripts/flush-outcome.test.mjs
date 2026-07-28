@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { flushOutcome, sendLabel } from "./flush-outcome.mjs";
@@ -50,6 +51,13 @@ test("flushOutcome source is a self-contained function declaration", () => {
   ]) {
     assert.deepEqual(isolatedFlushOutcome(input), flushOutcome(input));
   }
+});
+
+test("overlay keeps an exact inline copy of flushOutcome", () => {
+  const overlay = readFileSync(new URL("../assets/overlay.js", import.meta.url), "utf8");
+  const match = overlay.match(/^  function flushOutcome\(flush\) \{[\s\S]*?^  }\n\n(?=  function)/m);
+  assert.ok(match);
+  assert.equal(match[0].trimEnd().replace(/^  /gm, ""), flushOutcome.toString());
 });
 
 test("sendLabel distinguishes server delivery from local archiving", () => {
