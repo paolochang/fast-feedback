@@ -206,7 +206,7 @@
   document.body.style.marginTop = BAR_H + "px";
 
   var FILE = window.__FFB_FILE || document.title || (location.pathname + location.search) || "frontend";
-  var anns = [];            // committed: {id, n, sel, region, comment, sent, revision, boxEl}
+  var anns = [];            // committed: {id, n, sel, region, comment, sentToInbox, revision, boxEl}
   var counter = 0;
   var active = false, drawing = false, startPage = null, tempEl = null;
   var draft = null;         // in-progress NEW annotation: {sel, region, boxEl}
@@ -249,6 +249,25 @@
     toast.textContent = message;
     toast.className = "__ffb_toast open" + (error ? " error" : "");
     toastTimer = setTimeout(function () { toast.className = "__ffb_toast"; }, 2600);
+  }
+
+  function flushOutcome(flush) {
+    var sentToInbox = flush.sentToInbox;
+    var count = flush.count;
+
+    if (count === 0) {
+      return { clear: false, toast: "Nothing new to send", isError: false };
+    }
+
+    if (sentToInbox === true) {
+      return { clear: true, toast: "Sent " + count + " items ✓", isError: false };
+    }
+
+    return {
+      clear: false,
+      toast: "Archived " + count + " locally — the AI did not receive this. Use Copy All.",
+      isError: true,
+    };
   }
 
   var layer = document.createElement("div");
@@ -412,7 +431,7 @@
   function submitForm() {
     if (!draft) { form.classList.remove("open"); return; }
     var n = ++counter;
-    var ann = { id: crypto.randomUUID(), n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), sent: false, revision: 0, boxEl: draft.boxEl };
+    var ann = { id: crypto.randomUUID(), n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), sentToInbox: false, revision: 0, boxEl: draft.boxEl };
     decorateBox(ann);
     anns.push(ann);
     draft = null;
@@ -934,14 +953,17 @@
         return historyStore.archive(meta, capture.blob);
       });
     }).then(function () {
-      var flushed = snapshot.filter(function (entry) { return entry.ann.revision === entry.revision && anns.indexOf(entry.ann) !== -1; });
-      flushed.forEach(function (entry) { if (entry.ann.boxEl) entry.ann.boxEl.remove(); });
-      anns = anns.filter(function (a) { return !flushed.some(function (entry) { return entry.ann === a; }); });
+      var outcome = flushOutcome({ sentToInbox: sentToInbox, count: items.length });
+      if (outcome.clear) {
+        var flushed = snapshot.filter(function (entry) { return entry.ann.revision === entry.revision && anns.indexOf(entry.ann) !== -1; });
+        flushed.forEach(function (entry) { if (entry.ann.boxEl) entry.ann.boxEl.remove(); });
+        anns = anns.filter(function (a) { return !flushed.some(function (entry) { return entry.ann === a; }); });
+      }
       historyRows = null;
       historyError = false;
       historyVisibleCount = 10;
       renderList();
-      showToast((sentToInbox ? "Sent " : "Archived ") + items.length + " items ✓", false);
+      showToast(outcome.toast, outcome.isError);
     }).catch(function () {
       showToast(archiveStarted ? "Archive failed — items kept" : "Send failed — items kept", true);
     }).then(function () {
