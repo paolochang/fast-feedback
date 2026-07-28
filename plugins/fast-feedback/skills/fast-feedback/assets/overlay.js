@@ -344,6 +344,15 @@
     return { x: Math.max(6, Math.min(window.innerWidth - w - 6, x)), y: Math.max(BAR_H + 6, Math.min(window.innerHeight - h - 6, y)) };
   }
 
+  // The ONLY writer of bar.style.display. Both the master toggle (setEnabled)
+  // and the Write arm/disarm (setActive) go through it, so neither can clobber
+  // the other — setEnabled(false) calls setActive(false) on its way out, and a
+  // second independent writer there would re-show the bar it just hid.
+  // The bar hides while Write is armed so the band beneath it can be annotated.
+  function syncBarVisibility() {
+    bar.style.display = enabled && !active ? "flex" : "none";
+  }
+
   // "Write" arms the highlight cursor. It's NOT a sticky toggle: after one box
   // is drawn it disarms itself (see mouseup) so you don't leave a crosshair on
   // by accident. Clicking again before drawing / Ctrl+/ re-arms or cancels it.
@@ -351,6 +360,7 @@
     active = v;
     layer.classList.toggle("active", v);
     bar.querySelector("#__ffb_toggle").classList.toggle("on", v);
+    syncBarVisibility();
   }
 
   // ---- drawing → new annotation ----------------------------------------
@@ -1549,7 +1559,7 @@
   function setEnabled(v) {
     enabled = v;
     try { localStorage.setItem("__ffb_enabled", v ? "1" : "0"); } catch (e) {}
-    bar.style.display = v ? "flex" : "none";
+    syncBarVisibility();
     boxwrap.style.display = v ? "" : "none";
     if (!v) { closeList(); form.classList.remove("open"); confirmEl.classList.remove("open"); closeSettings(); setActive(false); }
   }
@@ -1585,7 +1595,7 @@
   });
 
   // ---- re-show hook (live mode paste-twice) -----------------------------
-  window.__ffb_show = function () { setEnabled(true); };
+  window.__ffb_show = function () { setEnabled(true); setActive(false); };
   window.__ffb_teardown = function () {
     clearHistoryThumbs();
     [bar, toast, layer, boxwrap, form, panel, confirmEl, settingsEl, style].forEach(function (n) { if (n && n.remove) n.remove(); });
