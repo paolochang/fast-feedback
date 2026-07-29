@@ -498,10 +498,11 @@
   }
   fTa.addEventListener("keydown", function (e) {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submitForm(); }
-    // The form owns Esc while it is open, so the event stops here rather than
-    // continuing to the window handler and closing the list behind it. The window
-    // side cannot tell: tryCloseForm() has already dropped the form's "open" class
-    // by the time the event would arrive, so the guard there sees no open form.
+    // The form owns Esc while it is open. Stopping it here is what keeps it off
+    // the host page, whose dialogs and menus listen for Escape on `document` —
+    // an ancestor of this textarea, so it would otherwise see the key too. The
+    // overlay's capture-phase listener yields to this one on the form's "open"
+    // class rather than resolving the form itself.
     else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); tryCloseForm(); }
   });
 
@@ -719,12 +720,11 @@
         item.querySelector(".__ffb_ec").onclick = closeEdit;
         ta.addEventListener("keydown", function (e) {
           if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); }
-          // The edit owns Esc while it is open, so stop it here: it would otherwise
-          // reach the window handler and close the whole list as well. That cannot
-          // be guarded on the window side — closeEdit() re-renders the list, so by
-          // the time the event gets there this textarea has been detached and both
-          // `editingN` and a "is the target inside the panel" test read as if no
-          // edit was ever open.
+          // The edit owns Esc while it is open. Stopping it here is what keeps it
+          // off the host page, whose dialogs and menus listen for Escape on
+          // `document` — an ancestor of this textarea, so it would otherwise see
+          // the key too. The overlay's capture-phase listener yields to this one
+          // on `editingN` rather than resolving the edit itself.
           else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeEdit(); }
         });
       } else {
@@ -764,8 +764,7 @@
 
   function closeHistoryLightbox() {
     if (!historyLightbox) return;
-    document.removeEventListener("keydown", historyLightbox.onKeydown);
-    historyLightbox.el.remove();
+    historyLightbox.remove();
     historyLightbox = null;
   }
 
@@ -787,16 +786,13 @@
     lightbox.appendChild(close);
     lightbox.appendChild(shot);
     root.appendChild(lightbox);
-    // The lightbox owns Esc while it is open, so stop the event here: it would
-    // otherwise keep bubbling to the window handler, which closes the list — and
-    // that would drop the history detail view the lightbox was opened from. A
-    // guard on the window side can't do this, because this listener has already
-    // cleared historyLightbox by the time the event gets there.
-    var onKeydown = function (event) { if (event.key === "Escape") { event.stopPropagation(); closeHistoryLightbox(); } };
-    historyLightbox = { el: lightbox, onKeydown: onKeydown };
+    // Esc while this is open closes the lightbox and nothing else — it must not
+    // reach the list, or the history detail view the lightbox was opened from
+    // would be discarded along with it. That is resolved by the capture-phase
+    // listener near the hotkey handler, which checks historyLightbox first.
+    historyLightbox = lightbox;
     close.onclick = closeHistoryLightbox;
     lightbox.onclick = function (event) { if (event.target === lightbox) closeHistoryLightbox(); };
-    document.addEventListener("keydown", onKeydown);
   }
 
   function historyTime(ts) {
@@ -1770,6 +1766,36 @@
     setNote("Set " + labelFor(action) + " → " + comboLabel(b) + ".", false);
   }, true);
 
+  // ---- Escape ownership (capture phase) ---------------------------------
+  // Escape has to be claimed before the HOST page sees it. A host dialog or menu
+  // normally listens on `document` in the bubble phase, and that runs ahead of
+  // any window-level bubble listener — so resolving Escape down there let one
+  // key close the host's UI as well as ours.
+  //
+  // stopPropagation() in the capture phase at `window` ends the dispatch
+  // outright: nothing further down runs, not even the overlay's own bubble
+  // handlers. So this listener cannot merely claim the key, it has to perform
+  // the action too, which is why the Escape branches live here rather than in
+  // the keydown handler below.
+  //
+  // Running first is also what makes these guards trustworthy. Every earlier
+  // attempt to read `editingN` / `form.open` / `historyLightbox` from the window
+  // bubble handler was reading state that a nearer handler had already mutated
+  // or detached — the bug behind three separate regressions on this branch.
+  // Here nothing has run yet, so the state is current by construction.
+  window.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape" || capturing) return;   // a rebind capture owns every key
+    var claim = function (fn) { e.preventDefault(); e.stopPropagation(); fn(); };
+    if (settingsOpen) return claim(closeSettings);
+    if (historyLightbox) return claim(closeHistoryLightbox);
+    // The annotation form, the inline note edit and the confirm each resolve
+    // Escape on their own element, where it never reaches the host page to begin
+    // with. Yield to them instead of second-guessing what they do with the key.
+    if (form.classList.contains("open") || confirmEl.classList.contains("open") || editingN !== null) return;
+    if (active) return claim(function () { setActive(false); });   // disarm Write before closing the list
+    if (panel.classList.contains("open")) return claim(closeList);
+  }, true);
+
   // ---- custom tooltip (short text + keycap chips) -----------------------
   // Replaces native title= tooltips (ugly, uncontrollable). Content is built on
   // hover from the LIVE binding, so it always matches the current shortcut.
@@ -1831,19 +1857,11 @@
   // Ctrl+. show/hide · Ctrl+/ annotate · Ctrl+[ list · Ctrl+' copy · Ctrl+\\ send
   // · Ctrl+; screenshot. Form-local Esc/Ctrl+Enter are handled on the textareas above.
   window.addEventListener("keydown", function (e) {
-    if (settingsOpen) { if (e.key === "Escape" && !capturing) { e.preventDefault(); closeSettings(); } return; } // settings owns the keyboard
+    if (settingsOpen) return;   // settings owns the keyboard; its Esc is resolved in the capture listener above
     if (capturing) return;
     var typing = /^(input|textarea|select)$/i.test((e.target && e.target.tagName) || "") || (e.target && e.target.isContentEditable);
-    // Esc disarms Write when it's armed and no annotation form is open.
-    if (e.key === "Escape" && active && !form.classList.contains("open")) { e.preventDefault(); setActive(false); return; }
-    // Esc then closes the list. Everything nearer that wants the key claims it
-    // before this: the settings dialog returns above, the annotation form and the
-    // inline note edit stop the event on their own textareas, and a confirm is
-    // checked here. Deliberately NOT guarded on "is a field focused" — a field on
-    // the host page has no claim on this key, and treating it as one made Esc do
-    // nothing whenever the list had been opened by hotkey from a focused host
-    // input, which is exactly the case where the mouse was never used at all.
-    if (e.key === "Escape" && panel.classList.contains("open") && !form.classList.contains("open") && !confirmEl.classList.contains("open") && editingN === null) { e.preventDefault(); closeList(); return; }
+    // Escape never reaches here — the capture listener above resolves it before
+    // the host page can also act on it. Only the hotkey combos are left.
     var ctrl = e.ctrlKey || e.metaKey;
     if (!ctrl && !e.altKey && !e.shiftKey) return; // ignore plain keys
     for (var i = 0; i < HK_ORDER.length; i++) {

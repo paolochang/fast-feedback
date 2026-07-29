@@ -179,7 +179,10 @@ user:
   **History (12)**); a tab with nothing in it just reads **Live** / **History**
   rather than showing a zero. Each note shows as read-only text. **Esc** closes
   the list, unless something nearer owns the key (an open form, a confirm, or a
-  note you're editing). Hovering a note reveals **✎ edit** and **🗑 delete**
+  note you're editing). When the overlay takes **Esc** it takes it *exclusively* —
+  the app underneath never sees that keypress, so one Esc won't close the list
+  and your own dialog at the same time. When nothing of the overlay's is open,
+  Esc belongs to the app as usual. Hovering a note reveals **✎ edit** and **🗑 delete**
   (top-right of the card) — delete turns red on hover so the destructive one is
   obvious before you click it; a committed box also has a **🗑 on its top-right
   corner**, grey until you hover it and then the same red.
