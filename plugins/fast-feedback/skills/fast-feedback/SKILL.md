@@ -174,7 +174,7 @@ user:
 - writes the fix and clicks **Submit** (or **Ctrl+Enter**) → the box is committed
   with a number and the list count goes up. Closing an unsaved box asks before
   discarding, so nothing is lost by accident.
-- opens the list — **List** button or **Ctrl+[** — titled **Feedback (n)**, with
+- opens the list — **List** button or **Ctrl+[** — titled **Feedback**, with
   a **Live** and a **History** tab. Each carries its own count (**Live (3)**,
   **History (12)**); a tab with nothing in it just reads **Live** / **History**
   rather than showing a zero. Each note shows as read-only text. **Esc** closes
@@ -185,8 +185,12 @@ user:
   corner**, grey until you hover it and then the same red.
   Editing is inline; closing a changed edit asks before reverting. Deleting
   asks first (**Cancel / Discard**).
-- the list header also has **Copy** and **Clear** — Clear wipes every note after a
-  confirm (**Cancel / Clear**) and restarts numbering at [1].
+- the right-hand end of the tab row carries the actions for whatever is on screen.
+  On **Live** that's **Copy** and **Clear** — Clear wipes every note after a
+  confirm (**Cancel / Clear**) and restarts numbering at [1]. On the **History**
+  list there are none. With an archived batch open it's **Copy** (that batch's
+  feedback as text) and **Copy screenshot** (its PNG to the clipboard, falling
+  back to a download where the clipboard is blocked).
 - copies everything — **Copy All** button or **Ctrl+'** — and pastes it back.
 - **Screenshot** — **Screenshot** button or **Ctrl+;** — renders the page (with
   the annotation boxes in it, minus this overlay's own bar) to a PNG and copies
