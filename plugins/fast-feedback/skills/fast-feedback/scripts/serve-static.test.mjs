@@ -130,6 +130,20 @@ test("writes a static session marker after binding the server port", async () =>
   });
 });
 
+test("returns the session marker id from the static server ping", async () => {
+  await withStatic({ "mockup.html": "<body>page</body>" }, async ({ file, inbox }) => {
+    const server = await startStatic(file, inbox);
+    try {
+      const marker = JSON.parse(await readFile(join(inbox, "session.json"), "utf8"));
+      const ping = await request({ port: server.port, path: "/__ffb__/ping" });
+      assert.equal(ping.status, 200);
+      assert.equal(JSON.parse(ping.body).id, marker.id);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
 test("starts static serving when its session marker cannot be written", async () => {
   await withStatic({ "mockup.html": "<body>page</body>" }, async ({ file, inbox }) => {
     await writeFile(inbox, "not a directory", "utf8");
