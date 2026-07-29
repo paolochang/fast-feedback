@@ -540,10 +540,10 @@
   function refreshHistoryCount() {
     if (historyCount !== null || historyCountLoading || historyLoading || !historyIsAvailable()) return;
     historyCountLoading = true;
-    historyStore.list().then(function (rows) {
+    historyStore.count().then(function (total) {
       historyCountLoading = false;
       if (historyCount !== null) return;
-      historyCount = Array.isArray(rows) ? rows.length : 0;
+      historyCount = Number(total) || 0;
       updateHistoryCount();
     }).catch(function () {
       historyCountLoading = false;
@@ -600,6 +600,22 @@
       return requestStore("readonly", function (store) { return store.get(id); });
     }
 
+    function listAll() {
+      if (typeof window.__FFB_HISTORY_LIST === "function") {
+        try { return Promise.resolve(window.__FFB_HISTORY_LIST()); } catch (e) { return Promise.reject(e); }
+      }
+      return requestStore("readonly", function (store) { return store.getAll(); }).then(function (records) {
+        return records.map(function (record) {
+          var meta = record.meta || {}, preview = "";
+          (Array.isArray(meta.items) ? meta.items : []).some(function (item) {
+            if (String(item.comment || "").trim()) { preview = item.comment; return true; }
+            return false;
+          });
+          return { id: record.id, ts: meta.ts, url: meta.url, count: (meta.items || []).length, preview: preview };
+        }).sort(function (a, b) { return (Date.parse(b.ts) || 0) - (Date.parse(a.ts) || 0); });
+      });
+    }
+
     return {
       archive: function (meta, pngBlob) {
         if (typeof window.__FFB_ARCHIVE === "function") {
@@ -613,20 +629,20 @@
         }
         return requestStore("readwrite", function (store) { return store.put({ id: meta.id, meta: meta, pngBlob: pngBlob }); });
       },
-      list: function () {
+      list: listAll,
+      // A count does not need the records. IndexedDB answers count() from the
+      // store's keys, so the archived screenshots are never part of the read,
+      // whereas list() hands back every record just to take .length. It matters
+      // here because the Live tab fills this count in too: refreshHistoryCount
+      // runs on a list open whenever the count is unknown — the first open, and
+      // again after a send resets it — not only when History is visited. The
+      // served mode has no count route, but its list is a metadata-only summary
+      // with no PNGs in it.
+      count: function () {
         if (typeof window.__FFB_HISTORY_LIST === "function") {
-          try { return Promise.resolve(window.__FFB_HISTORY_LIST()); } catch (e) { return Promise.reject(e); }
+          return listAll().then(function (rows) { return Array.isArray(rows) ? rows.length : 0; });
         }
-        return requestStore("readonly", function (store) { return store.getAll(); }).then(function (records) {
-          return records.map(function (record) {
-            var meta = record.meta || {}, preview = "";
-            (Array.isArray(meta.items) ? meta.items : []).some(function (item) {
-              if (String(item.comment || "").trim()) { preview = item.comment; return true; }
-              return false;
-            });
-            return { id: record.id, ts: meta.ts, url: meta.url, count: (meta.items || []).length, preview: preview };
-          }).sort(function (a, b) { return (Date.parse(b.ts) || 0) - (Date.parse(a.ts) || 0); });
-        });
+        return requestStore("readonly", function (store) { return store.count(); });
       },
       getMeta: function (id) {
         if (typeof window.__FFB_HISTORY_META === "function") {
@@ -1011,10 +1027,16 @@
           canvas.height = img.naturalHeight;
           var ctx = canvas.getContext("2d");
           ctx.drawImage(img, 0, 0);
-          // The archive may be captured at a different pixel ratio than it was
-          // laid out at, so scale the chrome to match rather than hard-coding px.
+          // The PNG was rendered at the capturing display's devicePixelRatio, so
+          // the CSS-pixel constants below (2px border, 11px label) have to be
+          // multiplied by that ratio or they come out half/third size on a HiDPI
+          // screen. It cannot be derived from cap.w: that IS the PNG's own pixel
+          // width, so the ratio would always be exactly 1. cap.docW is the CSS
+          // width at capture time — the same basis captureRegion normalizes
+          // against. Archives written before docW was stored fall back to 1.
           var cap = meta && meta.capture;
-          var scale = cap && Number(cap.w) ? canvas.width / Number(cap.w) : 1;
+          var cssW = cap ? Number(cap.docW) : 0;
+          var scale = cssW > 0 ? canvas.width / cssW : 1;
           var cs = getComputedStyle(document.documentElement);
           var gold = cs.getPropertyValue("--__ffb_gold").trim() || "#e8b23f";
           var fill = cs.getPropertyValue("--__ffb_hlfill").trim() || "rgba(232,178,63,.14)";
@@ -1152,7 +1174,10 @@
           id: crypto.randomUUID(),
           ts: new Date().toISOString(),
           url: flushUrl,
-          capture: { w: capture.w, h: capture.h },
+          // docW is the document's CSS width at capture time; w is the rendered
+          // pixel width. Their ratio is the device-pixels-per-CSS-pixel factor,
+          // which the History composite needs to size its chrome (composeHistoryShot).
+          capture: { w: capture.w, h: capture.h, docW: capture.docW },
           items: snapshot.map(function (entry, index) {
             var item = items[index];
             return {
