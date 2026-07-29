@@ -35,8 +35,15 @@
     // --__ffb_gold is the accent/highlight (recolorable). --__ffb_onaccent is the
     // readable text on it; --__ffb_hlfill / --__ffb_hlflash are its translucent
     // box fills. JS overrides these when a custom highlight color is picked.
-    ':root{--__ffb_gold:#e8b23f;--__ffb_onaccent:#231a00;--__ffb_hlfill:rgba(232,178,63,.14);--__ffb_hlflash:rgba(232,178,63,.5);--__ffb_ink:#e8eaf0;--__ffb_mut:#8b93a6;--__ffb_surf:#12151c;--__ffb_head:#0f1218;--__ffb_line:#2b3140;--__ffb_field:#0e1116;--__ffb_card:#171b23;--__ffb_btn:#1b2029;--__ffb_btnh:#222834;--__ffb_warn:#e06b5a;--__ffb_listen:#241a04;--__ffb_chip:#39445a;--__ffb_chipink:#e2e7f0;--__ffb_shadow:rgba(0,0,0,.5);--__ffb_shadowbar:rgba(0,0,0,.34)}',
-    ':root.__ffb_light{--__ffb_gold:#e5484d;--__ffb_onaccent:#ffffff;--__ffb_hlfill:rgba(229,72,77,.13);--__ffb_hlflash:rgba(229,72,77,.4);--__ffb_ink:#1c2126;--__ffb_mut:#6b7480;--__ffb_surf:#f5f6f8;--__ffb_head:#eceef2;--__ffb_line:#e2e5ea;--__ffb_field:#ffffff;--__ffb_card:#ffffff;--__ffb_btn:#ffffff;--__ffb_btnh:#f0f1f4;--__ffb_warn:#c0392b;--__ffb_listen:#fdeaea;--__ffb_chip:#e0e4ec;--__ffb_chipink:#3d4655;--__ffb_shadow:rgba(17,24,39,.16);--__ffb_shadowbar:rgba(17,24,39,.07)}',
+    // --__ffb_warn and --__ffb_danger are both "something destructive/wrong" reds
+    // but they are NOT interchangeable. --__ffb_warn is used as TEXT (toast errors,
+    // settings notes), so in dark mode it has to be a lighter salmon to stay legible
+    // on the dark surface. --__ffb_danger is the delete affordance, and both delete
+    // controls (the list icon and the box's corner button) must land on the same
+    // deep red in a given theme. Collapsing them would either wash out delete or
+    // make error text unreadable.
+    ':root{--__ffb_gold:#e8b23f;--__ffb_onaccent:#231a00;--__ffb_hlfill:rgba(232,178,63,.14);--__ffb_hlflash:rgba(232,178,63,.5);--__ffb_ink:#e8eaf0;--__ffb_mut:#8b93a6;--__ffb_surf:#12151c;--__ffb_head:#0f1218;--__ffb_line:#2b3140;--__ffb_field:#0e1116;--__ffb_card:#171b23;--__ffb_btn:#1b2029;--__ffb_btnh:#222834;--__ffb_warn:#e06b5a;--__ffb_danger:#c0392b;--__ffb_listen:#241a04;--__ffb_chip:#39445a;--__ffb_chipink:#e2e7f0;--__ffb_shadow:rgba(0,0,0,.5);--__ffb_shadowbar:rgba(0,0,0,.34)}',
+    ':root.__ffb_light{--__ffb_gold:#e5484d;--__ffb_onaccent:#ffffff;--__ffb_hlfill:rgba(229,72,77,.13);--__ffb_hlflash:rgba(229,72,77,.4);--__ffb_ink:#1c2126;--__ffb_mut:#6b7480;--__ffb_surf:#f5f6f8;--__ffb_head:#eceef2;--__ffb_line:#e2e5ea;--__ffb_field:#ffffff;--__ffb_card:#ffffff;--__ffb_btn:#ffffff;--__ffb_btnh:#f0f1f4;--__ffb_warn:#c0392b;--__ffb_danger:#c0392b;--__ffb_listen:#fdeaea;--__ffb_chip:#e0e4ec;--__ffb_chipink:#3d4655;--__ffb_shadow:rgba(17,24,39,.16);--__ffb_shadowbar:rgba(17,24,39,.07)}',
     '.__ffb_bar,.__ffb_form,.__ffb_panel,.__ffb_box,.__ffb_layer,.__ffb_confirm,.__ffb_modal{box-sizing:border-box;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}',
     // top strip
     '.__ffb_bar{position:fixed;z-index:2147483645;top:0;left:0;right:0;height:' + BAR_H + 'px;display:flex;gap:8px;align-items:center;padding:0 12px;background:var(--__ffb_surf);border-bottom:1px solid var(--__ffb_line);box-shadow:0 1px 0 var(--__ffb_line),0 2px 14px var(--__ffb_shadowbar);color:var(--__ffb_ink)}',
@@ -57,7 +64,9 @@
     '.__ffb_box.flash{animation:__ffb_flash .9s ease}',
     '@keyframes __ffb_flash{0%,100%{background:var(--__ffb_hlfill)}40%{background:var(--__ffb_hlflash)}}',
     '.__ffb_box .__ffb_num{position:absolute;top:-1px;left:-1px;background:var(--__ffb_gold);color:var(--__ffb_onaccent);font-size:11px;font-weight:800;padding:1px 6px;border-radius:0 0 6px 0}',
-    '.__ffb_box .__ffb_bdel{position:absolute;top:-11px;right:-11px;width:22px;height:22px;border-radius:50%;background:#c0392b;color:#fff;border:2px solid #fff;font-size:11px;line-height:1;cursor:pointer;display:none;align-items:center;justify-content:center;padding:0}',
+    '.__ffb_box .__ffb_bdel{position:absolute;top:-11px;right:-11px;width:22px;height:22px;border-radius:50%;background:var(--__ffb_mut);color:#fff;border:2px solid #fff;cursor:pointer;display:none;align-items:center;justify-content:center;padding:0}',
+    '.__ffb_box .__ffb_bdel:hover{background:var(--__ffb_danger)}',
+    '.__ffb_box .__ffb_bdel svg{width:11px;height:11px;display:block}',
     '.__ffb_box:hover .__ffb_bdel{display:flex}',
     '.__ffb_temp{position:absolute;border:2px dashed var(--__ffb_gold);background:var(--__ffb_hlfill);z-index:2147483200;pointer-events:none}',
     // shared floating card (form + panel)
@@ -98,7 +107,7 @@
     '.__ffb_item:hover .__ffb_tools{display:flex}',
     '.__ffb_ic{width:22px;height:22px;border-radius:6px;border:1px solid var(--__ffb_line);background:var(--__ffb_surf);color:var(--__ffb_ink);font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}',
     '.__ffb_ic:hover{border-color:var(--__ffb_gold)}',
-    '.__ffb_ic.__ffb_del:hover{color:var(--__ffb_warn);border-color:var(--__ffb_warn)}',
+    '.__ffb_ic.__ffb_del:hover{color:var(--__ffb_danger);border-color:var(--__ffb_danger)}',
     '.__ffb_item textarea{box-sizing:border-box;width:100%;background:var(--__ffb_field);color:var(--__ffb_ink);border:1px solid var(--__ffb_line);border-radius:6px;padding:6px 8px;font-size:13px;font-family:inherit;resize:vertical;min-height:52px}',
     '.__ffb_item .__ffb_iact{display:flex;gap:6px;justify-content:flex-end;margin-top:6px}',
     '.__ffb_hist{display:flex;gap:9px}',
@@ -287,13 +296,13 @@
     '<button class="__ffb_btn" id="__ffb_pcopy" style="padding:3px 9px">Copy</button>' +
     '<button class="__ffb_btn" id="__ffb_pclear" style="padding:3px 9px">Clear</button>' +
     '<button class="__ffb_x" title="Close">✕</button></div>' +
-    '<div class="__ffb_tabs"><button class="__ffb_tab sel" data-tab="live">Live</button><button class="__ffb_tab" data-tab="history">History</button></div>' +
+    '<div class="__ffb_tabs"><button class="__ffb_tab sel" data-tab="live">Live<span id="__ffb_livecnt"> (0)</span></button><button class="__ffb_tab" data-tab="history">History<span id="__ffb_histcnt"></span></button></div>' +
     '<div class="__ffb_list" id="__ffb_items"></div>' +
     '<div id="__ffb_foot" style="padding:10px 12px;border-top:1px solid var(--__ffb_line);display:flex">' +
     '<button class="__ffb_btn primary" id="__ffb_psend" title="Send new feedback to AI" style="flex:1;padding:8px 12px">Send to AI</button></div>';
   root.appendChild(panel);
   var itemsEl = panel.querySelector("#__ffb_items");
-  var activeListTab = "live", historyRows = null, historyLoading = false, historyError = false;
+  var activeListTab = "live", historyRows = null, historyLoading = false, historyError = false, historyCount = null, historyCountLoading = false;
   var historyVisibleCount = 10, historyObjectUrls = [], historyObserver = null, historyDetailId = null, historyLightbox = null;
 
   // ---- confirm dialog ---------------------------------------------------
@@ -445,7 +454,7 @@
   function decorateBox(a) {
     var box = a.boxEl;
     box.className = "__ffb_box";
-    box.innerHTML = '<div class="__ffb_num">' + a.n + '</div><button class="__ffb_bdel" title="Delete this highlight">🗑</button>';
+    box.innerHTML = '<div class="__ffb_num">' + a.n + '</div><button class="__ffb_bdel" title="Delete this highlight"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button>';
     box.onclick = function () { openList(); flashBox(a.n); };
     box.querySelector(".__ffb_bdel").onclick = function (e) { e.stopPropagation(); deleteAnn(a); };
   }
@@ -471,7 +480,7 @@
 
   // ---- list (read-only + inline edit) ----------------------------------
   var editingN = null;
-  function openList() { panel.classList.add("open"); if (!panel.style.left) { panel.style.right = "auto"; panel.style.left = (window.innerWidth - 350) + "px"; panel.style.top = (BAR_H + 12) + "px"; } renderList(); }
+  function openList() { panel.classList.add("open"); if (!panel.style.left) { panel.style.right = "auto"; panel.style.left = (window.innerWidth - 350) + "px"; panel.style.top = (BAR_H + 12) + "px"; } refreshHistoryCount(); renderList(); }
   function toggleList() { if (panel.classList.contains("open")) closeList(); else openList(); }
   function flashBox(n) {
     var a = anns.filter(function (x) { return x.n === n; })[0];
@@ -480,11 +489,32 @@
   function updateCount() {
     bar.querySelector("#__ffb_cnt").textContent = anns.length;
     panel.querySelector("#__ffb_ptitlecnt").textContent = anns.length;
+    panel.querySelector("#__ffb_livecnt").textContent = " (" + anns.length + ")";
   }
   function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
 
   function hasIndexedDb() {
     try { return !!window.indexedDB; } catch (e) { return false; }
+  }
+
+  function historyIsAvailable() {
+    return typeof window.__FFB_HISTORY_LIST === "function" || hasIndexedDb();
+  }
+
+  function updateHistoryCount() {
+    panel.querySelector("#__ffb_histcnt").textContent = historyCount === null ? "" : " (" + historyCount + ")";
+  }
+
+  function refreshHistoryCount() {
+    if (historyCount !== null || historyCountLoading || !historyIsAvailable()) return;
+    historyCountLoading = true;
+    historyStore.list().then(function (rows) {
+      historyCount = Array.isArray(rows) ? rows.length : 0;
+      historyCountLoading = false;
+      updateHistoryCount();
+    }).catch(function () {
+      historyCountLoading = false;
+    });
   }
 
   var historyStore = (function () {
@@ -798,7 +828,7 @@
     clearHistoryThumbs();
     itemsEl.innerHTML = "";
     if (historyDetailId !== null) { renderHistoryDetail(historyDetailId); return; }
-    if (typeof window.__FFB_HISTORY_LIST !== "function" && !hasIndexedDb()) {
+    if (!historyIsAvailable()) {
       itemsEl.innerHTML = '<div class="__ffb_empty">History is available when Fast Feedback is served through the proxy.</div>';
       return;
     }
@@ -809,6 +839,8 @@
     itemsEl.innerHTML = '<div class="__ffb_loading"><div class="__ffb_spin"></div>Loading history…</div>';
     historyStore.list().then(function (rows) {
       historyRows = Array.isArray(rows) ? rows.slice().sort(function (a, b) { return (Date.parse(b.ts) || 0) - (Date.parse(a.ts) || 0); }) : [];
+      historyCount = historyRows.length;
+      updateHistoryCount();
       historyLoading = false;
       if (activeListTab === "history") renderList();
     }).catch(function () {
@@ -965,6 +997,9 @@
       historyRows = null;
       historyError = false;
       historyVisibleCount = 10;
+      historyCount = null;
+      updateHistoryCount();
+      refreshHistoryCount();
       renderList();
       showToast((sentToInbox ? "Sent " : "Archived ") + items.length + " items ✓", false);
     }).catch(function () {
