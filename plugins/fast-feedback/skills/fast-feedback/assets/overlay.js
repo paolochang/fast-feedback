@@ -168,6 +168,13 @@
     '.__ffb_keybtn.listening{border-color:var(--__ffb_gold);color:var(--__ffb_gold);background:var(--__ffb_listen)}',
     '.__ffb_snote{padding:2px 12px 0;color:var(--__ffb_mut);font-size:11.5px;min-height:16px}',
     '.__ffb_snote.warn{color:var(--__ffb_warn)}',
+    // The version block sits here, below the shortcut hint and outside the
+    // scrollable rows. The 7px plus the separator's own 3px top margin reproduce
+    // the 10px that used to sit between these two blocks when their order was
+    // reversed. It collapses when empty so a build without a version string does
+    // not leave a padded gap above the buttons.
+    '.__ffb_verrow{padding:7px 12px 0;display:flex;flex-direction:column;gap:7px}',
+    '.__ffb_verrow:empty{display:none}',
     '.__ffb_setact{display:flex;gap:8px;justify-content:flex-end;padding:10px 12px 12px}',
     // hover polish for bar + secondary buttons
     '.__ffb_bar button:hover{background:var(--__ffb_btnh);border-color:var(--__ffb_line)}',
@@ -1497,11 +1504,13 @@
     '<div class="__ffb_hd2"><span class="__ffb_ttl">Settings</span><button class="__ffb_x" title="Close">✕</button></div>' +
     '<div class="__ffb_srows" id="__ffb_srows"></div>' +
     '<div class="__ffb_snote" id="__ffb_snote"></div>' +
+    '<div class="__ffb_verrow" id="__ffb_verrow"></div>' +
     '<div class="__ffb_setact"><button class="__ffb_btn" id="__ffb_hkreset">Reset to defaults</button><button class="__ffb_btn primary" id="__ffb_hkdone">Done</button></div>' +
     '</div>';
   root.appendChild(settingsEl);
   var srows = settingsEl.querySelector("#__ffb_srows");
   var snote = settingsEl.querySelector("#__ffb_snote");
+  var verrow = settingsEl.querySelector("#__ffb_verrow");
   var HINT = "Click a shortcut, then press your combo — Ctrl (or ⌘) plus optional Alt / Shift and a key. Esc cancels.";
   function setNote(msg, warn) { snote.textContent = msg; snote.className = "__ffb_snote" + (warn ? " warn" : ""); }
   var SUB = 'color:var(--__ffb_mut);font-weight:400';
@@ -1586,11 +1595,16 @@
       srows.appendChild(row);
     });
 
+    // The version renders into its own container below the shortcut hint, not into
+    // srows. Keeping it out of the scroll area means it and the hint stay pinned
+    // above the buttons together; the hint in particular has to stay put, since
+    // setNote() uses it for rebind prompts and conflict warnings.
+    verrow.innerHTML = "";
     var version = window.__FFB_VERSION;
     if (typeof version === "string" && version) {
       var sep3 = document.createElement("div");
       sep3.className = "__ffb_srow_sep";
-      srows.appendChild(sep3);
+      verrow.appendChild(sep3);
 
       var vrow = document.createElement("div");
       vrow.className = "__ffb_srow __ffb_version";
@@ -1610,7 +1624,7 @@
         vrow.appendChild(badge);
         vrow.appendChild(commands);
       }
-      srows.appendChild(vrow);
+      verrow.appendChild(vrow);
     }
   }
   function stopCapture() {
