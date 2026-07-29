@@ -1051,18 +1051,24 @@
   }
 
   // Falls back to the stored blob if compositing fails, so a copy still happens.
+  //
+  // The ClipboardItem is built synchronously from the *pending* composite, the
+  // same way shoot() does it. Awaiting the composite first and writing afterwards
+  // would run the write in a later task, without the click's transient user
+  // activation, and browsers that require activation reject it — so the copy would
+  // silently become a download every time.
   function copyHistoryScreenshot(meta, blob, button) {
-    composeHistoryShot(meta, blob).catch(function () { return blob; }).then(function (out) {
-      if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
-        try {
-          navigator.clipboard.write([new ClipboardItem({ "image/png": out })])
-            .then(function () { flashButton(button, "Copied ✓"); })
-            .catch(function () { downloadHistoryScreenshot(out, button); });
-        } catch (e) { downloadHistoryScreenshot(out, button); }
-      } else {
-        downloadHistoryScreenshot(out, button);
-      }
-    });
+    var blobPromise = composeHistoryShot(meta, blob).catch(function () { return blob; });
+    var fallback = function () { blobPromise.then(function (out) { downloadHistoryScreenshot(out, button); }); };
+    if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+      try {
+        navigator.clipboard.write([new ClipboardItem({ "image/png": blobPromise })])
+          .then(function () { flashButton(button, "Copied ✓"); })
+          .catch(fallback);
+      } catch (e) { fallback(); }
+    } else {
+      fallback();
+    }
   }
 
   function copyAll() {
