@@ -90,6 +90,17 @@ test("writeSession replaces a prior server on its URL and retains only eight new
   });
 });
 
+test("concurrent writeSession calls retain both server markers", async () => {
+  await withInbox(async () => {
+    const first = { id: "first-session", mode: "static", version: "0.3.0", url: "http://127.0.0.1:5000", started_at: "2026-07-28T12:00:00.000Z" };
+    const second = { id: "second-session", mode: "proxy", version: "0.3.0", url: "http://127.0.0.1:5001", started_at: "2026-07-28T12:00:01.000Z" };
+
+    await Promise.all([writeSession(first), writeSession(second)]);
+
+    assert.deepEqual(await readSessions(), [first, second]);
+  });
+});
+
 test("appendItems atomically spools every item and regenerates both mirrors", async () => {
   await withInbox(async (dir) => {
     const items = [
