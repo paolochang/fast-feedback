@@ -1773,12 +1773,19 @@
   // any window-level bubble listener — so resolving Escape down there let one
   // key close the host's UI as well as ours.
   //
-  // stopPropagation() from the capture phase at `window` keeps the event from
-  // ever reaching `document`, the target, or the bubble phase at all. Nothing
-  // below can act on it, so this listener has to perform the action rather than
-  // defer — which is why it is the ONE place Escape is resolved. (It does not
-  // stop other listeners on `window` in this same phase; the `capturing` guard
-  // below is explicit for that reason rather than relying on registration order.)
+  // stopImmediatePropagation() from the capture phase at `window` keeps the
+  // event from reaching `document`, the target, the bubble phase, and any later
+  // listener on `window` itself. Nothing below can act on it, so this listener
+  // has to perform the action rather than defer — which is why it is the ONE
+  // place Escape is resolved.
+  //
+  // The one thing it cannot preempt is a host listener registered on `window` in
+  // the capture phase BEFORE the overlay loads: same target, same phase, earlier
+  // registration wins, and no script that loads later can get in front of it.
+  // That is a DOM ordering fact, not a bug to fix here. Measured: a host handler
+  // in any other position (document capture or bubble, window bubble) sees
+  // nothing; only that one still fires. Console/bookmarklet mode injects last,
+  // so it is the mode most exposed to it.
   //
   // Being the only owner is also what makes the state readable. Every earlier
   // attempt to read `editingN` / `form.open` / `historyLightbox` from the bubble
@@ -1787,7 +1794,7 @@
   // bubble phase has run yet, so what these guards see is what is on screen.
   window.addEventListener("keydown", function (e) {
     if (e.key !== "Escape" || capturing) return;   // a rebind capture owns every key
-    var claim = function (fn) { e.preventDefault(); e.stopPropagation(); fn(); };
+    var claim = function (fn) { e.preventDefault(); e.stopImmediatePropagation(); fn(); };
     // Innermost first. All of these share one z-index, so what you see on top is
     // whatever was appended to `root` last — the lightbox, then the settings
     // modal, then the confirm the form or the edit raised.
