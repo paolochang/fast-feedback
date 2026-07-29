@@ -92,11 +92,18 @@
     // children: space-between then puts the tabs at one end and the actions at the
     // other. Without the wrapper the tabs are siblings of the action area and
     // space-between spreads all three, pushing History into the middle of the row.
-    '.__ffb_tabs{display:flex;justify-content:space-between;align-items:flex-start;padding:8px 10px 0;border-bottom:1px solid var(--__ffb_line)}',
+    '.__ffb_tabs{display:flex;justify-content:space-between;align-items:center;padding:8px 10px 0;border-bottom:1px solid var(--__ffb_line)}',
     '.__ffb_tabgroup{display:flex;gap:4px}',
     '.__ffb_tab{border:0;border-bottom:2px solid transparent;background:none;color:var(--__ffb_mut);padding:0 2px 7px;font:700 12px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;cursor:pointer}',
     '.__ffb_tab.sel{color:var(--__ffb_gold);border-color:var(--__ffb_gold)}',
-    '.__ffb_tabact{display:flex;gap:4px}',
+    // A tab reserves 9px under its label for the selected underline (7px padding
+    // + a 2px border), so its text rides high in its own box while a button's text
+    // sits centred in its own — the buttons read as sitting too low. Lift them by
+    // half that strip to put the two labels on the same line. It has to be a
+    // relative offset rather than a margin: a margin here would make this the
+    // tallest item in the row, growing the row and dragging the tabs' underline
+    // off the bottom border it is supposed to sit on.
+    '.__ffb_tabact{display:flex;gap:4px;position:relative;top:-4.5px}',
     '.__ffb_panel .__ffb_list{overflow:auto;padding:10px;display:flex;flex-direction:column;gap:8px}',
     '.__ffb_empty{color:var(--__ffb_mut);font-size:12.5px;text-align:center;padding:14px 8px}',
     // Loading indicator — visually distinct from the empty state (a spinner), so a
@@ -300,7 +307,7 @@
   panel.innerHTML =
     '<div class="__ffb_hd"><span class="__ffb_grip">⠿</span><span class="__ffb_ttl">Feedback</span>' +
     '<button class="__ffb_x" title="Close">✕</button></div>' +
-    '<div class="__ffb_tabs"><div class="__ffb_tabgroup"><button class="__ffb_tab sel" data-tab="live">Live<span id="__ffb_livecnt"></span></button><button class="__ffb_tab" data-tab="history">History<span id="__ffb_histcnt"></span></button></div><div id="__ffb_tabact"></div></div>' +
+    '<div class="__ffb_tabs"><div class="__ffb_tabgroup"><button class="__ffb_tab sel" data-tab="live">Live<span id="__ffb_livecnt"></span></button><button class="__ffb_tab" data-tab="history">History<span id="__ffb_histcnt"></span></button></div><div class="__ffb_tabact" id="__ffb_tabact"></div></div>' +
     '<div class="__ffb_list" id="__ffb_items"></div>' +
     '<div id="__ffb_foot" style="padding:10px 12px;border-top:1px solid var(--__ffb_line);display:flex">' +
     '<button class="__ffb_btn primary" id="__ffb_psend" title="Send new feedback to AI" style="flex:1;padding:8px 12px">Send to AI</button></div>';
