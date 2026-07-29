@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import vm from "node:vm";
 
 const core = await import("./serve-core.mjs");
 const overlayPath = new URL("../assets/overlay.js", import.meta.url);
@@ -40,6 +41,26 @@ function authorizedHeaders(port, contentType = "application/json") {
   };
 }
 
+function bootHelpers(fetch) {
+  const boot = core.renderBoot({ fileLabel: "localhost:3000" });
+  const match = boot.match(/^\n<script>([\s\S]*?)<\/script>/);
+  assert.ok(match);
+  const sandbox = { window: {}, fetch };
+  vm.runInNewContext(match[1], sandbox);
+  return sandbox.window;
+}
+
+test("renderBoot helpers reject failed settings and screenshot writes", async () => {
+  const helpers = bootHelpers(async () => ({
+    ok: false,
+    status: 403,
+    json: async () => ({ error: "forbidden" }),
+  }));
+
+  await assert.rejects(() => helpers.__FFB_SAVE({ theme: "dark" }), /Settings failed: 403/);
+  await assert.rejects(() => helpers.__FFB_SAVE_SHOT(new Uint8Array()), /Screenshot failed: 403/);
+});
+
 test("handleFfbRoute rejects /send without the token", async () => {
   const server = await startServer();
   try {
@@ -49,6 +70,24 @@ test("handleFfbRoute rejects /send without the token", async () => {
       body: "[]",
     });
     assert.equal(response.status, 403);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("handleFfbRoute rejects settings and screenshot writes with the wrong token", async () => {
+  const server = await startServer();
+  try {
+    for (const path of ["/__ffb__/settings", "/__ffb__/screenshot"]) {
+      const response = await request({
+        port: server.address().port,
+        path,
+        headers: { "x-ffb-token": "stale-token" },
+        body: "stale",
+      });
+      assert.equal(response.status, 403);
+      assert.deepEqual(JSON.parse(response.body), { error: "forbidden" });
+    }
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

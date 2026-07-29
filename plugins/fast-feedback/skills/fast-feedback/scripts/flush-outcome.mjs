@@ -5,6 +5,7 @@
 // what `flush-outcome.test.mjs`'s self-containment test pins.
 export function flushOutcome(flush) {
   var sentToInbox = flush.sentToInbox;
+  var archivedNew = flush.archivedNew;
   var count = flush.count;
 
   if (count === 0) {
@@ -13,6 +14,10 @@ export function flushOutcome(flush) {
 
   if (sentToInbox === true) {
     return { clear: true, toast: "Sent " + count + " items ✓", isError: false };
+  }
+
+  if (archivedNew === 0) {
+    return { clear: false, toast: "Already archived — the AI did not receive this. Use Copy All.", isError: true };
   }
 
   return {

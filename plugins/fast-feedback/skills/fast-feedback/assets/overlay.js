@@ -206,7 +206,7 @@
   document.body.style.marginTop = BAR_H + "px";
 
   var FILE = window.__FFB_FILE || document.title || (location.pathname + location.search) || "frontend";
-  var anns = [];            // committed: {id, n, sel, region, comment, sentToInbox, revision, boxEl}
+  var anns = [];            // committed: {id, n, sel, region, comment, sentToInbox, revision, archivedRevision, boxEl}
   var counter = 0;
   var active = false, drawing = false, startPage = null, tempEl = null;
   var draft = null;         // in-progress NEW annotation: {sel, region, boxEl}
@@ -253,6 +253,7 @@
 
   function flushOutcome(flush) {
     var sentToInbox = flush.sentToInbox;
+    var archivedNew = flush.archivedNew;
     var count = flush.count;
 
     if (count === 0) {
@@ -261,6 +262,10 @@
 
     if (sentToInbox === true) {
       return { clear: true, toast: "Sent " + count + " items ✓", isError: false };
+    }
+
+    if (archivedNew === 0) {
+      return { clear: false, toast: "Already archived — the AI did not receive this. Use Copy All.", isError: true };
     }
 
     return {
@@ -443,7 +448,7 @@
   function submitForm() {
     if (!draft) { form.classList.remove("open"); return; }
     var n = ++counter;
-    var ann = { id: crypto.randomUUID(), n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), sentToInbox: false, revision: 0, boxEl: draft.boxEl };
+    var ann = { id: crypto.randomUUID(), n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), sentToInbox: false, revision: 0, archivedRevision: -1, boxEl: draft.boxEl };
     decorateBox(ann);
     anns.push(ann);
     draft = null;
@@ -913,6 +918,7 @@
       return { id: entry.id, n: a.n, sel: a.sel, region: a.region, comment: a.comment, url: location.href, ts: new Date().toISOString() };
     });
     var toSend = snapshot.filter(function (entry) { return !entry.ann.sentToInbox; });
+    var toArchive = snapshot.filter(function (entry) { return entry.ann.archivedRevision !== entry.revision; });
     var request;
     var sentToInbox = false;
     var archiveStarted = false;
@@ -933,8 +939,8 @@
     // snapshot: an SPA nav/resize/reflow during the in-flight send can't smear a
     // newer screenshot (or route) over regions frozen at flush start. The send
     // stays independent of capture — inbox delivery must not hinge on html2canvas.
-    var capturePromise = capturePng(true);
-    capturePromise.catch(function () {});   // send-fail paths discard it; avoid an unhandled rejection
+    var capturePromise = toArchive.length ? capturePng(true) : null;
+    if (capturePromise) capturePromise.catch(function () {});   // send-fail paths discard it; avoid an unhandled rejection
     Promise.resolve(request).then(function () {
       if (canSend) {
         sentToInbox = true;
@@ -944,6 +950,7 @@
         // re-delivered to the inbox on the next flush.
         toSend.forEach(function (entry) { if (entry.ann.revision === entry.revision) entry.ann.sentToInbox = true; });
       }
+      if (!toArchive.length) return null;
       archiveStarted = true;
       return capturePromise.then(function (capture) {
         var meta = {
@@ -962,10 +969,12 @@
             };
           })
         };
-        return historyStore.archive(meta, capture.blob);
+        return historyStore.archive(meta, capture.blob).then(function () {
+          toArchive.forEach(function (entry) { if (entry.ann.revision === entry.revision) entry.ann.archivedRevision = entry.revision; });
+        });
       });
     }).then(function () {
-      var outcome = flushOutcome({ sentToInbox: sentToInbox, count: items.length });
+      var outcome = flushOutcome({ sentToInbox: sentToInbox, archivedNew: toArchive.length, count: items.length });
       if (outcome.clear) {
         var flushed = snapshot.filter(function (entry) { return entry.ann.revision === entry.revision && anns.indexOf(entry.ann) !== -1; });
         flushed.forEach(function (entry) { if (entry.ann.boxEl) entry.ann.boxEl.remove(); });
@@ -1153,7 +1162,7 @@
   // NEXT trigger restores it. Hotkeys are stored globally; theme per project.
   var INJECTED = (window.__FFB_SETTINGS && typeof window.__FFB_SETTINGS === "object") ? window.__FFB_SETTINGS : {};
   var PROJECT = window.__FFB_PROJECT || "default";
-  function persist(partial) { if (typeof window.__FFB_SAVE === "function") { try { window.__FFB_SAVE(partial); } catch (e) {} } }
+  function persist(partial) { if (typeof window.__FFB_SAVE === "function") { try { window.__FFB_SAVE(partial).catch(function () { showToast("Settings save failed", true); }); } catch (e) { showToast("Settings save failed", true); } } }
 
   var hotkeys = (function () {
     var h = {}; for (var k in DEFAULT_HOTKEYS) h[k] = cloneBinding(DEFAULT_HOTKEYS[k]);
