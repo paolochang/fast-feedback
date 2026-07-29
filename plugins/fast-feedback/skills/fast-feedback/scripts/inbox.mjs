@@ -1,13 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { parseSessions, renderSessions } from "./session.mjs";
+import { parseSessions } from "./session.mjs";
 
 export function inboxPath() {
   return process.env.FFB_INBOX ? resolve(process.env.FFB_INBOX) : join(process.cwd(), ".ffb");
 }
 
-function sessionPath() {
+function sessionsPath() {
+  return join(inboxPath(), "sessions");
+}
+
+function legacySessionPath() {
   return join(inboxPath(), "session.json");
 }
 
@@ -38,22 +42,60 @@ async function writeAtomically(path, contents) {
 }
 
 export async function writeSession(session) {
-  const path = sessionPath();
-  await mkdir(inboxPath(), { recursive: true });
-  await withLock(inboxPath(), async () => {
-    const sessions = (await readSessions()).filter(({ url }) => url !== session.url);
-    sessions.push(session);
-    sessions.sort((left, right) => left.started_at.localeCompare(right.started_at));
-    await writeAtomically(path, renderSessions(sessions.slice(-8)));
-  });
+  if (!(typeof session?.id === "string" && session.id && !/[\\/]/.test(session.id) && !session.id.includes(".."))) {
+    throw new TypeError("session id must be a safe filename");
+  }
+  const dir = sessionsPath();
+  const filename = session.id + ".json";
+  await mkdir(dir, { recursive: true });
+  await writeAtomically(join(dir, filename), JSON.stringify(session));
+  let names;
+  try {
+    names = await readdir(dir);
+  } catch {
+    return;
+  }
+  await Promise.all(names.filter((name) => name !== filename).map(async (name) => {
+    try {
+      const sessions = parseSessions(await readFile(join(dir, name), "utf8"));
+      if (sessions.some(({ url, id }) => url === session.url && id !== session.id)) {
+        await rm(join(dir, name), { force: true });
+      }
+    } catch {
+      // Marker cleanup is best-effort; concurrent removals are harmless.
+    }
+  }));
 }
 
 export async function readSessions() {
+  let names;
   try {
-    return parseSessions(await readFile(sessionPath(), "utf8"));
+    names = await readdir(sessionsPath());
   } catch {
-    return [];
+    names = [];
   }
+  const seen = new Set();
+  const sessions = [];
+  const add = (entries) => {
+    for (const session of entries) {
+      if (seen.has(session.id)) continue;
+      seen.add(session.id);
+      sessions.push(session);
+    }
+  };
+  await Promise.all(names.filter((name) => name.endsWith(".json")).map(async (name) => {
+    try {
+      add(parseSessions(await readFile(join(sessionsPath(), name), "utf8")));
+    } catch {
+      // Invalid and disappearing markers are ignored.
+    }
+  }));
+  try {
+    add(parseSessions(await readFile(legacySessionPath(), "utf8")));
+  } catch {
+    // The legacy marker is optional.
+  }
+  return sessions.sort((left, right) => left.started_at.localeCompare(right.started_at)).slice(-8);
 }
 
 async function recoverAbandonedClaims(pendingDir) {

@@ -280,9 +280,6 @@ test("ffb_status probes loopback session markers", { concurrency: false }, async
       }
       assert.deepEqual(requested, [
         "http://127.0.0.1:4321/__ffb__/ping",
-        "http://127.0.0.1:4321/__ffb__/ping",
-        "http://localhost:4321/__ffb__/ping",
-        "http://127.0.0.1:4321/__ffb__/ping",
         "http://localhost:4321/__ffb__/ping",
         "http://[::1]:4321/__ffb__/ping",
       ]);
@@ -322,9 +319,9 @@ test("ffb_status reports marker liveness and only hints when not running", { con
     await new Promise((resolve) => foreign.listen(0, "127.0.0.1", resolve));
     const foreignUrl = "http://127.0.0.1:" + foreign.address().port;
     try {
-      await writeSession({ id: "foreign-session", mode: "static", version: "0.3.0", url: foreignUrl, started_at: "2026-07-28T12:00:00.000Z" });
+      await writeSession({ id: "foreign-session", mode: "static", version: "0.3.0", url: foreignUrl, started_at: "2026-07-28T12:00:01.000Z" });
       const foreignStatus = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
-      assert.deepEqual(foreignStatus.server, { state: "not_responding", mode: "static", url: foreignUrl, started_at: "2026-07-28T12:00:00.000Z" });
+      assert.deepEqual(foreignStatus.server, { state: "not_responding", mode: "static", url: foreignUrl, started_at: "2026-07-28T12:00:01.000Z" });
       assert.ok(foreignStatus.hint);
     } finally {
       await new Promise((resolve) => foreign.close(resolve));
@@ -333,7 +330,7 @@ test("ffb_status reports marker liveness and only hints when not running", { con
     const started = Date.now();
     const stopped = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
     assert.ok(Date.now() - started < 1000);
-    assert.deepEqual(stopped.server, { state: "not_responding", mode: "static", url: foreignUrl, started_at: "2026-07-28T12:00:00.000Z" });
+    assert.deepEqual(stopped.server, { state: "not_responding", mode: "static", url: foreignUrl, started_at: "2026-07-28T12:00:01.000Z" });
     assert.ok(stopped.hint);
   });
 });

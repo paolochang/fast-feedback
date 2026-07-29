@@ -80,6 +80,12 @@ async function withStatic(files, run, documentName = "mockup.html") {
   }
 }
 
+async function readSessionMarker(inbox) {
+  const names = await readdir(join(inbox, "sessions"));
+  assert.equal(names.length, 1);
+  return JSON.parse(await readFile(join(inbox, "sessions", names[0]), "utf8"));
+}
+
 async function runCli(args) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [scriptPath, ...args], { env: { ...process.env, FFB_NO_OPEN: "1" }, stdio: ["ignore", "pipe", "pipe"] });
@@ -114,7 +120,7 @@ test("writes a static session marker after binding the server port", async () =>
   await withStatic({ "mockup.html": "<body>page</body>" }, async ({ file, inbox }) => {
     const server = await startStatic(file, inbox);
     try {
-      const marker = JSON.parse(await readFile(join(inbox, "session.json"), "utf8")).sessions[0];
+      const marker = await readSessionMarker(inbox);
       assert.deepEqual({ ...marker, id: undefined, started_at: undefined }, {
         id: undefined,
         mode: "static",
@@ -134,7 +140,7 @@ test("returns the session marker id from the static server ping", async () => {
   await withStatic({ "mockup.html": "<body>page</body>" }, async ({ file, inbox }) => {
     const server = await startStatic(file, inbox);
     try {
-      const marker = JSON.parse(await readFile(join(inbox, "session.json"), "utf8")).sessions[0];
+      const marker = await readSessionMarker(inbox);
       const ping = await request({ port: server.port, path: "/__ffb__/ping" });
       assert.equal(ping.status, 200);
       assert.equal(JSON.parse(ping.body).id, marker.id);
