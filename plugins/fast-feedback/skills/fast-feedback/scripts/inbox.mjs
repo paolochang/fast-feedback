@@ -62,9 +62,11 @@ export async function writeSession(session, { now = Date.now, uptime = systemUpt
   }
   await Promise.all(names.filter((name) => name !== filename).map(async (name) => {
     try {
-      const sessions = parseSessions(await readFile(join(dir, name), "utf8"));
+      const contents = await readFile(join(dir, name), "utf8");
+      const freshUptimeMs = Math.round(uptime() * 1000);
+      const sessions = parseSessions(contents);
       // This proves a reboot, but deliberately does not detect servers that died during this boot.
-      const beforeReboot = sessions.length > 0 && sessions.every(({ uptime_ms }) => uptime_ms !== undefined && uptimeMs + 1000 < uptime_ms);
+      const beforeReboot = sessions.length > 0 && sessions.every(({ uptime_ms }) => uptime_ms !== undefined && freshUptimeMs + 1000 < uptime_ms);
       if (beforeReboot || sessions.some(({ url, id }) => url === session.url && id !== session.id)) {
         await rm(join(dir, name), { force: true });
       }
@@ -181,13 +183,13 @@ function buildMarkdown(items) {
 
 // Best-effort serializer for the DERIVED mirror (inbox.jsonl / inbox.md) — a
 // human-only view that no MCP tool reads; peek/count/readAndClear read the spool
-// directly. It also serializes session-marker read-modify-write. Exactly-once
-// delivery is owned by claim-by-rename in readAndClear (an
+// directly. Exactly-once delivery is owned by claim-by-rename in readAndClear (an
 // atomic single-winner rename with ENOENT -> skip), NOT by this lock. So a
 // pathological stall that lets two operations overlap here can at worst leave a
 // transiently stale mirror, which the next operation's writeMirrors() self-heals;
-// it can never cause duplicate delivery or spool corruption. The same overlap can
-// drop a session marker, so this lease-based lock is not absolute exclusion.
+// it can never cause duplicate delivery or spool corruption. Session markers do
+// NOT use this lock — each server owns its own file, so there is nothing to
+// serialize there.
 export async function withLock(dir, run) {
   const lockDir = join(dir, ".lock");
   const ownerFile = join(lockDir, "owner");

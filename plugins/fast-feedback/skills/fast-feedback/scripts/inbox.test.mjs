@@ -112,6 +112,21 @@ test("writeSession prunes markers only after a reboot", async () => {
   });
 });
 
+test("writeSession retains a same-boot marker written after its uptime stamp", async () => {
+  await withInbox(async (dir) => {
+    const live = { id: "live", mode: "static", version: "0.3.0", url: "http://127.0.0.1:5000", started_at: "2026-07-28T12:00:00.000Z", uptime_ms: 15000 };
+    const current = { id: "current", mode: "proxy", version: "0.3.0", url: "http://127.0.0.1:5001", started_at: "2026-07-28T12:00:01.000Z" };
+    const sessionsDir = join(dir, "sessions");
+    await mkdir(sessionsDir);
+    await writeFile(join(sessionsDir, "live.json"), JSON.stringify(live), "utf8");
+
+    let calls = 0;
+    await writeSession(current, { uptime: () => (calls++ === 0 ? 10 : 20) });
+
+    assert.deepEqual((await readdir(sessionsDir)).sort(), ["current.json", "live.json"]);
+  });
+});
+
 test("concurrent writeSession calls retain both server markers", async () => {
   await withInbox(async (dir) => {
     const first = { id: "first-session", mode: "static", version: "0.3.0", url: "http://127.0.0.1:5000", started_at: "2026-07-28T12:00:00.000Z" };
