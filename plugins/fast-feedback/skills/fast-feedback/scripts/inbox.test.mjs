@@ -90,6 +90,29 @@ test("writeSession replaces a prior server on its URL while retaining other mark
   });
 });
 
+test("writeSession prunes only session markers provably before boot", async () => {
+  await withInbox(async (dir) => {
+    const now = Date.now();
+    const bootTime = now - 60 * 60 * 1000;
+    const marker = (id, startedAt) => ({ id, mode: "static", version: "0.3.0", url: "http://127.0.0.1:" + id, started_at: new Date(startedAt).toISOString() });
+    const preBoot = marker("pre-boot", bootTime - 60001);
+    const insideMargin = marker("inside-margin", bootTime - 1);
+    const afterBoot = marker("after-boot", bootTime + 1);
+    const sessionsDir = join(dir, "sessions");
+    await mkdir(sessionsDir);
+    await Promise.all([preBoot, insideMargin, afterBoot].map((session) => writeFile(join(sessionsDir, session.id + ".json"), JSON.stringify(session), "utf8")));
+
+    assert.deepEqual((await readSessions()).map(({ id }) => id), ["pre-boot", "inside-margin", "after-boot"]);
+    assert.deepEqual((await readdir(sessionsDir)).sort(), ["after-boot.json", "inside-margin.json", "pre-boot.json"]);
+
+    const current = marker("current", now);
+    await writeSession(current, { now: () => now, uptime: () => (now - bootTime) / 1000 });
+
+    assert.deepEqual((await readSessions()).map(({ id }) => id), ["inside-margin", "after-boot", "current"]);
+    assert.deepEqual((await readdir(sessionsDir)).sort(), ["after-boot.json", "current.json", "inside-margin.json"]);
+  });
+});
+
 test("concurrent writeSession calls retain both server markers", async () => {
   await withInbox(async (dir) => {
     const first = { id: "first-session", mode: "static", version: "0.3.0", url: "http://127.0.0.1:5000", started_at: "2026-07-28T12:00:00.000Z" };

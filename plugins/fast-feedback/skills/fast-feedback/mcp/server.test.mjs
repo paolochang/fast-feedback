@@ -389,6 +389,80 @@ test("ffb_status finds an oldest server after nine newer markers stop", { concur
   });
 });
 
+test("ffb_status limits dead-marker probes to eight concurrent requests", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    const previousNoUpdateCheck = process.env.FFB_NO_UPDATE_CHECK;
+    const previousFetch = globalThis.fetch;
+    let probes = 0;
+    let inFlight = 0;
+    let maxInFlight = 0;
+    process.env.FFB_NO_UPDATE_CHECK = "1";
+    globalThis.fetch = async () => {
+      probes += 1;
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      inFlight -= 1;
+      return { ok: false, json: async () => ({}) };
+    };
+    try {
+      for (let index = 0; index < 17; index += 1) {
+        await writeSession({
+          id: "dead-batch-" + index,
+          mode: "static",
+          version: "0.3.0",
+          url: "http://127.0.0.1:" + (5000 + index),
+          started_at: "2026-07-28T12:00:" + String(index).padStart(2, "0") + ".000Z",
+        });
+      }
+
+      const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+      assert.equal(status.server.state, "not_responding");
+      assert.equal(probes, 17);
+      assert.ok(maxInFlight <= 8);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousNoUpdateCheck === undefined) delete process.env.FFB_NO_UPDATE_CHECK;
+      else process.env.FFB_NO_UPDATE_CHECK = previousNoUpdateCheck;
+    }
+  });
+});
+
+test("ffb_status stops after probing the most recent live marker", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    const previousNoUpdateCheck = process.env.FFB_NO_UPDATE_CHECK;
+    const previousFetch = globalThis.fetch;
+    let probes = 0;
+    process.env.FFB_NO_UPDATE_CHECK = "1";
+    globalThis.fetch = async () => {
+      probes += 1;
+      return { ok: true, json: async () => ({ ffb: true, id: "newest-live" }) };
+    };
+    try {
+      for (let index = 0; index < 9; index += 1) {
+        await writeSession({
+          id: "older-dead-" + index,
+          mode: "static",
+          version: "0.3.0",
+          url: "http://127.0.0.1:" + (5100 + index),
+          started_at: "2026-07-28T12:00:" + String(index).padStart(2, "0") + ".000Z",
+        });
+      }
+      const newest = { id: "newest-live", mode: "static", version: "0.3.0", url: "http://127.0.0.1:5110", started_at: "2026-07-28T12:01:00.000Z" };
+      await writeSession(newest);
+
+      const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+      assert.deepEqual(status.server, { state: "running", mode: newest.mode, url: newest.url, started_at: newest.started_at });
+      assert.equal(status.hint, undefined);
+      assert.equal(probes, 1);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousNoUpdateCheck === undefined) delete process.env.FFB_NO_UPDATE_CHECK;
+      else process.env.FFB_NO_UPDATE_CHECK = previousNoUpdateCheck;
+    }
+  });
+});
+
 test("ffb_status accepts a legacy single-server marker", { concurrency: false }, async () => {
   await withInbox(async (inbox) => {
     const server = http.createServer((request, response) => {

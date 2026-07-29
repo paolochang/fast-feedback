@@ -57,13 +57,10 @@ function emptyStatusHint(inbox) {
 }
 
 async function sessionServerStatus() {
-  const sessions = await readSessions();
+  const sessions = (await readSessions()).sort((left, right) => right.started_at.localeCompare(left.started_at));
   if (!sessions.length) return { state: "none" };
-  const mostRecent = (entries) => entries.reduce((latest, entry) => (
-    entry.started_at >= latest.started_at ? entry : latest
-  ));
   const statusFor = (state, session) => ({ state, mode: session.mode, url: session.url, started_at: session.started_at });
-  const probes = await Promise.all(sessions.map(async (session) => {
+  const probe = async (session) => {
     let sessionUrl;
     try {
       sessionUrl = new URL(session.url);
@@ -78,10 +75,14 @@ async function sessionServerStatus() {
     } catch {
       return null;
     }
-  }));
-  const liveSessions = probes.filter(Boolean);
-  if (liveSessions.length) return statusFor("running", mostRecent(liveSessions));
-  return statusFor("not_responding", mostRecent(sessions));
+  };
+  const first = await probe(sessions[0]);
+  if (first) return statusFor("running", first);
+  for (let start = 1; start < sessions.length; start += 8) {
+    const live = (await Promise.all(sessions.slice(start, start + 8).map(probe))).find(Boolean);
+    if (live) return statusFor("running", live);
+  }
+  return statusFor("not_responding", sessions[0]);
 }
 
 function waitTimeoutMs() {

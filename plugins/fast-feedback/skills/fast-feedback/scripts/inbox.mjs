@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { uptime as systemUptime } from "node:os";
 import { join, resolve } from "node:path";
 import { parseSessions } from "./session.mjs";
 
@@ -41,7 +42,7 @@ async function writeAtomically(path, contents) {
   }
 }
 
-export async function writeSession(session) {
+export async function writeSession(session, { now = Date.now, uptime = systemUptime } = {}) {
   if (!(typeof session?.id === "string" && session.id && !/[\\/]/.test(session.id) && !session.id.includes(".."))) {
     throw new TypeError("session id must be a safe filename");
   }
@@ -55,10 +56,12 @@ export async function writeSession(session) {
   } catch {
     return;
   }
+  const preBootCutoff = now() - uptime() * 1000 - 60000;
   await Promise.all(names.filter((name) => name !== filename).map(async (name) => {
     try {
       const sessions = parseSessions(await readFile(join(dir, name), "utf8"));
-      if (sessions.some(({ url, id }) => url === session.url && id !== session.id)) {
+      const preBoot = sessions.length > 0 && sessions.every(({ started_at }) => Date.parse(started_at) < preBootCutoff);
+      if (preBoot || sessions.some(({ url, id }) => url === session.url && id !== session.id)) {
         await rm(join(dir, name), { force: true });
       }
     } catch {
