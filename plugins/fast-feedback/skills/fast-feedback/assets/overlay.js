@@ -26,7 +26,7 @@
   if (window.__ffb_loaded) { if (window.__ffb_show) window.__ffb_show(); return; }
   window.__ffb_loaded = true;
 
-  var BAR_H = 40; // top strip height; the page is pushed down by this much.
+  var BAR_H = 40; // top strip height.
   // Colors are CSS custom properties so the whole overlay can flip light/dark by
   // toggling one class (__ffb_light) on <html>. The annotation-box gold and the
   // dark-text-on-gold (#1a1300) are theme-invariant on purpose — the box is a
@@ -35,8 +35,15 @@
     // --__ffb_gold is the accent/highlight (recolorable). --__ffb_onaccent is the
     // readable text on it; --__ffb_hlfill / --__ffb_hlflash are its translucent
     // box fills. JS overrides these when a custom highlight color is picked.
-    ':root{--__ffb_gold:#e8b23f;--__ffb_onaccent:#231a00;--__ffb_hlfill:rgba(232,178,63,.14);--__ffb_hlflash:rgba(232,178,63,.5);--__ffb_ink:#e8eaf0;--__ffb_mut:#8b93a6;--__ffb_surf:#12151c;--__ffb_head:#0f1218;--__ffb_line:#2b3140;--__ffb_field:#0e1116;--__ffb_card:#171b23;--__ffb_btn:#1b2029;--__ffb_btnh:#222834;--__ffb_warn:#e06b5a;--__ffb_listen:#241a04;--__ffb_chip:#39445a;--__ffb_chipink:#e2e7f0;--__ffb_shadow:rgba(0,0,0,.5);--__ffb_shadowbar:rgba(0,0,0,.34)}',
-    ':root.__ffb_light{--__ffb_gold:#e5484d;--__ffb_onaccent:#ffffff;--__ffb_hlfill:rgba(229,72,77,.13);--__ffb_hlflash:rgba(229,72,77,.4);--__ffb_ink:#1c2126;--__ffb_mut:#6b7480;--__ffb_surf:#f5f6f8;--__ffb_head:#eceef2;--__ffb_line:#e2e5ea;--__ffb_field:#ffffff;--__ffb_card:#ffffff;--__ffb_btn:#ffffff;--__ffb_btnh:#f0f1f4;--__ffb_warn:#c0392b;--__ffb_listen:#fdeaea;--__ffb_chip:#e0e4ec;--__ffb_chipink:#3d4655;--__ffb_shadow:rgba(17,24,39,.16);--__ffb_shadowbar:rgba(17,24,39,.07)}',
+    // --__ffb_warn and --__ffb_danger are both "something destructive/wrong" reds
+    // but they are NOT interchangeable. --__ffb_warn is used as TEXT (toast errors,
+    // settings notes), so in dark mode it has to be a lighter salmon to stay legible
+    // on the dark surface. --__ffb_danger is the delete affordance, and both delete
+    // controls (the list icon and the box's corner button) must land on the same
+    // deep red in a given theme. Collapsing them would either wash out delete or
+    // make error text unreadable.
+    ':root{--__ffb_gold:#e8b23f;--__ffb_onaccent:#231a00;--__ffb_hlfill:rgba(232,178,63,.14);--__ffb_hlflash:rgba(232,178,63,.5);--__ffb_ink:#e8eaf0;--__ffb_mut:#8b93a6;--__ffb_surf:#12151c;--__ffb_head:#0f1218;--__ffb_line:#2b3140;--__ffb_field:#0e1116;--__ffb_card:#171b23;--__ffb_btn:#1b2029;--__ffb_btnh:#222834;--__ffb_warn:#e06b5a;--__ffb_danger:#c0392b;--__ffb_listen:#241a04;--__ffb_chip:#39445a;--__ffb_chipink:#e2e7f0;--__ffb_shadow:rgba(0,0,0,.5);--__ffb_shadowbar:rgba(0,0,0,.34)}',
+    ':root.__ffb_light{--__ffb_gold:#e5484d;--__ffb_onaccent:#ffffff;--__ffb_hlfill:rgba(229,72,77,.13);--__ffb_hlflash:rgba(229,72,77,.4);--__ffb_ink:#1c2126;--__ffb_mut:#6b7480;--__ffb_surf:#f5f6f8;--__ffb_head:#eceef2;--__ffb_line:#e2e5ea;--__ffb_field:#ffffff;--__ffb_card:#ffffff;--__ffb_btn:#ffffff;--__ffb_btnh:#f0f1f4;--__ffb_warn:#c0392b;--__ffb_danger:#c0392b;--__ffb_listen:#fdeaea;--__ffb_chip:#e0e4ec;--__ffb_chipink:#3d4655;--__ffb_shadow:rgba(17,24,39,.16);--__ffb_shadowbar:rgba(17,24,39,.07)}',
     '.__ffb_bar,.__ffb_form,.__ffb_panel,.__ffb_box,.__ffb_layer,.__ffb_confirm,.__ffb_modal{box-sizing:border-box;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}',
     // top strip
     '.__ffb_bar{position:fixed;z-index:2147483645;top:0;left:0;right:0;height:' + BAR_H + 'px;display:flex;gap:8px;align-items:center;padding:0 12px;background:var(--__ffb_surf);border-bottom:1px solid var(--__ffb_line);box-shadow:0 1px 0 var(--__ffb_line),0 2px 14px var(--__ffb_shadowbar);color:var(--__ffb_ink)}',
@@ -57,12 +64,15 @@
     '.__ffb_box.flash{animation:__ffb_flash .9s ease}',
     '@keyframes __ffb_flash{0%,100%{background:var(--__ffb_hlfill)}40%{background:var(--__ffb_hlflash)}}',
     '.__ffb_box .__ffb_num{position:absolute;top:-1px;left:-1px;background:var(--__ffb_gold);color:var(--__ffb_onaccent);font-size:11px;font-weight:800;padding:1px 6px;border-radius:0 0 6px 0}',
-    '.__ffb_box .__ffb_bdel{position:absolute;top:-11px;right:-11px;width:22px;height:22px;border-radius:50%;background:#c0392b;color:#fff;border:2px solid #fff;font-size:11px;line-height:1;cursor:pointer;display:none;align-items:center;justify-content:center;padding:0}',
+    '.__ffb_box .__ffb_bdel{position:absolute;top:-11px;right:-11px;width:22px;height:22px;border-radius:50%;background:var(--__ffb_mut);color:#fff;border:2px solid #fff;cursor:pointer;display:none;align-items:center;justify-content:center;padding:0}',
+    '.__ffb_box .__ffb_bdel:hover{background:var(--__ffb_danger)}',
+    '.__ffb_box .__ffb_bdel svg{width:11px;height:11px;display:block}',
     '.__ffb_box:hover .__ffb_bdel{display:flex}',
     '.__ffb_temp{position:absolute;border:2px dashed var(--__ffb_gold);background:var(--__ffb_hlfill);z-index:2147483200;pointer-events:none}',
     // shared floating card (form + panel)
     '.__ffb_form,.__ffb_panel{position:fixed;z-index:2147483646;background:var(--__ffb_surf);border:1px solid var(--__ffb_line);border-radius:10px;box-shadow:0 10px 34px var(--__ffb_shadow);color:var(--__ffb_ink);display:none;flex-direction:column;overflow:hidden}',
     '.__ffb_form.open,.__ffb_panel.open{display:flex}',
+    '.__ffb_panel.__ffb_hidearm{display:none}',
     '.__ffb_hd{display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--__ffb_head);border-bottom:1px solid var(--__ffb_line);cursor:move;user-select:none}',
     '.__ffb_hd .__ffb_ttl{font-size:12px;font-weight:700;color:var(--__ffb_gold);flex:1}',
     '.__ffb_hd .__ffb_x{cursor:pointer;background:none;border:none;color:var(--__ffb_mut);font-size:14px;line-height:1;padding:2px 4px}',
@@ -78,9 +88,22 @@
     '.__ffb_hint{color:var(--__ffb_mut);font-size:11px;align-self:center;margin-right:auto}',
     // panel (list)
     '.__ffb_panel{width:330px;max-height:70vh}',
-    '.__ffb_tabs{display:flex;gap:4px;padding:8px 10px 0;border-bottom:1px solid var(--__ffb_line)}',
+    // The tabs are wrapped in their own group so this row has exactly two flex
+    // children: space-between then puts the tabs at one end and the actions at the
+    // other. Without the wrapper the tabs are siblings of the action area and
+    // space-between spreads all three, pushing History into the middle of the row.
+    '.__ffb_tabs{display:flex;justify-content:space-between;align-items:center;padding:8px 10px 0;border-bottom:1px solid var(--__ffb_line)}',
+    '.__ffb_tabgroup{display:flex;gap:4px}',
     '.__ffb_tab{border:0;border-bottom:2px solid transparent;background:none;color:var(--__ffb_mut);padding:0 2px 7px;font:700 12px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;cursor:pointer}',
     '.__ffb_tab.sel{color:var(--__ffb_gold);border-color:var(--__ffb_gold)}',
+    // A tab reserves 9px under its label for the selected underline (7px padding
+    // + a 2px border), so its text rides high in its own box while a button's text
+    // sits centred in its own — the buttons read as sitting too low. Lift them by
+    // half that strip to put the two labels on the same line. It has to be a
+    // relative offset rather than a margin: a margin here would make this the
+    // tallest item in the row, growing the row and dragging the tabs' underline
+    // off the bottom border it is supposed to sit on.
+    '.__ffb_tabact{display:flex;gap:4px;position:relative;top:-4.5px}',
     '.__ffb_panel .__ffb_list{overflow:auto;padding:10px;display:flex;flex-direction:column;gap:8px}',
     '.__ffb_empty{color:var(--__ffb_mut);font-size:12.5px;text-align:center;padding:14px 8px}',
     // Loading indicator — visually distinct from the empty state (a spinner), so a
@@ -97,6 +120,7 @@
     '.__ffb_item:hover .__ffb_tools{display:flex}',
     '.__ffb_ic{width:22px;height:22px;border-radius:6px;border:1px solid var(--__ffb_line);background:var(--__ffb_surf);color:var(--__ffb_ink);font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}',
     '.__ffb_ic:hover{border-color:var(--__ffb_gold)}',
+    '.__ffb_ic.__ffb_del:hover{color:var(--__ffb_danger);border-color:var(--__ffb_danger)}',
     '.__ffb_item textarea{box-sizing:border-box;width:100%;background:var(--__ffb_field);color:var(--__ffb_ink);border:1px solid var(--__ffb_line);border-radius:6px;padding:6px 8px;font-size:13px;font-family:inherit;resize:vertical;min-height:52px}',
     '.__ffb_item .__ffb_iact{display:flex;gap:6px;justify-content:flex-end;margin-top:6px}',
     '.__ffb_hist{display:flex;gap:9px}',
@@ -124,11 +148,16 @@
     '.__ffb_bar #__ffb_setbtn{padding:4px 9px;font-size:17px;line-height:1}',
     '.__ffb_modal{position:fixed;z-index:2147483647;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center}',
     '.__ffb_modal.open{display:flex}',
-    '.__ffb_setdlg{background:var(--__ffb_surf);border:1px solid var(--__ffb_line);border-radius:10px;width:380px;max-width:calc(100vw - 24px);color:var(--__ffb_ink);box-shadow:0 12px 40px rgba(0,0,0,.6);overflow:hidden}',
+    // Capped to the viewport and laid out as a column so the rows are the part
+    // that gives: the header, the hint, the version and the buttons are all
+    // pinned, and if they plus the rows would overflow, the rows shrink and
+    // scroll instead of the dialog growing past the screen edge. Without the cap
+    // a short viewport pushes the title and the Done button out of reach.
+    '.__ffb_setdlg{background:var(--__ffb_surf);border:1px solid var(--__ffb_line);border-radius:10px;width:380px;max-width:calc(100vw - 24px);max-height:calc(100vh - 24px);display:flex;flex-direction:column;color:var(--__ffb_ink);box-shadow:0 12px 40px rgba(0,0,0,.6);overflow:hidden}',
     '.__ffb_setdlg .__ffb_hd2{display:flex;align-items:center;gap:6px;padding:10px 12px;background:var(--__ffb_head);border-bottom:1px solid var(--__ffb_line)}',
     '.__ffb_setdlg .__ffb_hd2 .__ffb_ttl{font-size:12.5px;font-weight:700;color:var(--__ffb_gold);flex:1}',
     '.__ffb_setdlg .__ffb_hd2 .__ffb_x{cursor:pointer;background:none;border:none;color:var(--__ffb_mut);font-size:14px;line-height:1;padding:2px 4px}',
-    '.__ffb_srows{padding:10px 12px;display:flex;flex-direction:column;gap:7px;max-height:62vh;overflow:auto}',
+    '.__ffb_srows{padding:10px 12px;display:flex;flex-direction:column;gap:7px;max-height:62vh;overflow:auto;flex:0 1 auto;min-height:0}',
     '.__ffb_srow{display:flex;align-items:center;gap:10px}',
     '.__ffb_srow .__ffb_slabel{flex:1;font-size:13px;color:var(--__ffb_ink)}',
     '.__ffb_seg{display:flex;gap:4px}',
@@ -144,6 +173,13 @@
     '.__ffb_keybtn.listening{border-color:var(--__ffb_gold);color:var(--__ffb_gold);background:var(--__ffb_listen)}',
     '.__ffb_snote{padding:2px 12px 0;color:var(--__ffb_mut);font-size:11.5px;min-height:16px}',
     '.__ffb_snote.warn{color:var(--__ffb_warn)}',
+    // The version block sits here, below the shortcut hint and outside the
+    // scrollable rows. The 7px plus the separator's own 3px top margin reproduce
+    // the 10px that used to sit between these two blocks when their order was
+    // reversed. It collapses when empty so a build without a version string does
+    // not leave a padded gap above the buttons.
+    '.__ffb_verrow{padding:7px 12px 0;display:flex;flex-direction:column;gap:7px}',
+    '.__ffb_verrow:empty{display:none}',
     '.__ffb_setact{display:flex;gap:8px;justify-content:flex-end;padding:10px 12px 12px}',
     // hover polish for bar + secondary buttons
     '.__ffb_bar button:hover{background:var(--__ffb_btnh);border-color:var(--__ffb_line)}',
@@ -188,6 +224,10 @@
     '.__ffb_toast{position:fixed;z-index:2147483647;right:14px;bottom:14px;display:none;max-width:320px;padding:9px 12px;background:var(--__ffb_surf);border:1px solid var(--__ffb_line);border-radius:8px;box-shadow:0 8px 24px var(--__ffb_shadow);color:var(--__ffb_ink);font:600 12.5px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}',
     '.__ffb_toast.open{display:block}',
     '.__ffb_toast.error{color:var(--__ffb_warn);border-color:var(--__ffb_warn)}',
+    '.__ffb_arm{position:fixed;z-index:2147483644;bottom:14px;left:50%;transform:translateX(-50%);display:none;align-items:center;gap:7px;padding:7px 10px;background:var(--__ffb_surf);border:1px solid var(--__ffb_line);border-radius:8px;box-shadow:0 8px 24px var(--__ffb_shadow);color:var(--__ffb_ink);font:600 12.5px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;pointer-events:none;white-space:nowrap}',
+    '.__ffb_arm.on{display:flex}',
+    '.__ffb_arm .__ffb_logo{color:var(--__ffb_gold)}',
+    '.__ffb_armhint{color:var(--__ffb_mut);font-weight:500}',
     '.__ffb_tiptext{color:var(--__ffb_ink);font-weight:500}',
     '.__ffb_keys{display:inline-flex;align-items:center;gap:4px}',
     '.__ffb_kbd{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;min-width:20px;height:20px;padding:0 7px;background:var(--__ffb_chip);color:var(--__ffb_chipink);border:1px solid rgba(127,127,127,.22);border-radius:6px;font-size:11px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}',
@@ -200,10 +240,6 @@
   var style = document.createElement("style");
   style.textContent = CSS;
   document.head.appendChild(style);
-
-  // Push the page down so the top strip never overlaps the app's own header.
-  var prevBodyMt = document.body.style.marginTop;
-  document.body.style.marginTop = BAR_H + "px";
 
   var FILE = window.__FFB_FILE || document.title || (location.pathname + location.search) || "frontend";
   var anns = [];            // committed: {id, n, sel, region, comment, sent, revision, boxEl}
@@ -243,6 +279,12 @@
   var toast = document.createElement("div");
   toast.className = "__ffb_toast";
   root.appendChild(toast);
+  var arm = document.createElement("div");
+  arm.className = "__ffb_arm";
+  arm.setAttribute("role", "status");
+  arm.setAttribute("aria-live", "polite");
+  arm.innerHTML = LOGO + '<span>Write mode</span><span class="__ffb_armhint">drag a box · Esc to cancel</span>';
+  root.appendChild(arm);
   var toastTimer = null;
   function showToast(message, error) {
     clearTimeout(toastTimer);
@@ -275,18 +317,16 @@
   var panel = document.createElement("div");
   panel.className = "__ffb_panel";
   panel.innerHTML =
-    '<div class="__ffb_hd"><span class="__ffb_grip">⠿</span><span class="__ffb_ttl">Feedback (<span id="__ffb_ptitlecnt">0</span>)</span>' +
-    '<button class="__ffb_btn" id="__ffb_pcopy" style="padding:3px 9px">Copy</button>' +
-    '<button class="__ffb_btn" id="__ffb_pclear" style="padding:3px 9px">Clear</button>' +
+    '<div class="__ffb_hd"><span class="__ffb_grip">⠿</span><span class="__ffb_ttl">Feedback</span>' +
     '<button class="__ffb_x" title="Close">✕</button></div>' +
-    '<div class="__ffb_tabs"><button class="__ffb_tab sel" data-tab="live">Live</button><button class="__ffb_tab" data-tab="history">History</button></div>' +
+    '<div class="__ffb_tabs"><div class="__ffb_tabgroup"><button class="__ffb_tab sel" data-tab="live">Live<span id="__ffb_livecnt"></span></button><button class="__ffb_tab" data-tab="history">History<span id="__ffb_histcnt"></span></button></div><div class="__ffb_tabact" id="__ffb_tabact"></div></div>' +
     '<div class="__ffb_list" id="__ffb_items"></div>' +
     '<div id="__ffb_foot" style="padding:10px 12px;border-top:1px solid var(--__ffb_line);display:flex">' +
     '<button class="__ffb_btn primary" id="__ffb_psend" title="Send new feedback to AI" style="flex:1;padding:8px 12px">Send to AI</button></div>';
   root.appendChild(panel);
   var itemsEl = panel.querySelector("#__ffb_items");
-  var activeListTab = "live", historyRows = null, historyLoading = false, historyError = false;
-  var historyVisibleCount = 10, historyObjectUrls = [], historyObserver = null, historyDetailId = null, historyLightbox = null;
+  var activeListTab = "live", historyRows = null, historyLoading = false, historyError = false, historyCount = null, historyCountLoading = false;
+  var historyVisibleCount = 10, historyObjectUrls = [], historyObserver = null, historyDetailId = null, historyDetailData = null, historyLightbox = null;
 
   // ---- confirm dialog ---------------------------------------------------
   var confirmEl = document.createElement("div");
@@ -296,7 +336,8 @@
     '<div class="__ffb_act"><button class="__ffb_btn" id="__ffb_cno">Cancel</button><button class="__ffb_btn primary" id="__ffb_cyes">Discard</button></div></div>';
   root.appendChild(confirmEl);
   var confirmCb = null;
-  confirmEl.querySelector("#__ffb_cno").onclick = function () { confirmEl.classList.remove("open"); confirmCb = null; };
+  function cancelConfirm() { confirmEl.classList.remove("open"); confirmCb = null; }
+  confirmEl.querySelector("#__ffb_cno").onclick = cancelConfirm;
   confirmEl.querySelector("#__ffb_cyes").onclick = function () { confirmEl.classList.remove("open"); var cb = confirmCb; confirmCb = null; if (cb) cb(); };
   // msg + optional button labels (default Cancel / Discard). Destructive actions
   // pass their own verb (e.g. "Clear") so the confirm reads unambiguously.
@@ -348,6 +389,17 @@
     return { x: Math.max(6, Math.min(window.innerWidth - w - 6, x)), y: Math.max(BAR_H + 6, Math.min(window.innerHeight - h - 6, y)) };
   }
 
+  // The ONLY writer of bar.style.display. Both the master toggle (setEnabled)
+  // and the Write arm/disarm (setActive) go through it, so neither can clobber
+  // the other — setEnabled(false) calls setActive(false) on its way out, and a
+  // second independent writer there would re-show the bar it just hid.
+  // The bar and panel hide while Write is armed so the page can be annotated.
+  function syncBarVisibility() {
+    bar.style.display = enabled && !active ? "flex" : "none";
+    arm.classList.toggle("on", enabled && active);
+    panel.classList.toggle("__ffb_hidearm", enabled && active);
+  }
+
   // "Write" arms the highlight cursor. It's NOT a sticky toggle: after one box
   // is drawn it disarms itself (see mouseup) so you don't leave a crosshair on
   // by accident. Clicking again before drawing / Ctrl+/ re-arms or cancels it.
@@ -355,6 +407,7 @@
     active = v;
     layer.classList.toggle("active", v);
     bar.querySelector("#__ffb_toggle").classList.toggle("on", v);
+    syncBarVisibility();
   }
 
   // ---- drawing → new annotation ----------------------------------------
@@ -425,7 +478,7 @@
   function decorateBox(a) {
     var box = a.boxEl;
     box.className = "__ffb_box";
-    box.innerHTML = '<div class="__ffb_num">' + a.n + '</div><button class="__ffb_bdel" title="Delete this highlight">🗑</button>';
+    box.innerHTML = '<div class="__ffb_num">' + a.n + '</div><button class="__ffb_bdel" title="Delete this highlight"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button>';
     box.onclick = function () { openList(); flashBox(a.n); };
     box.querySelector(".__ffb_bdel").onclick = function (e) { e.stopPropagation(); deleteAnn(a); };
   }
@@ -444,14 +497,22 @@
     if (fTa.value.trim()) confirmDiscard("Discard this annotation?", closeFormDiscard);
     else closeFormDiscard();
   }
+  // Esc is deliberately NOT handled here. It used to be, which meant the form
+  // only owned the key while this textarea was the focused element — tab to
+  // Cancel or Submit and Escape fell through to the host page instead. The
+  // capture-phase listener owns Escape for every overlay state now, wherever
+  // focus happens to be.
   fTa.addEventListener("keydown", function (e) {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submitForm(); }
-    else if (e.key === "Escape") { e.preventDefault(); tryCloseForm(); }
   });
 
   // ---- list (read-only + inline edit) ----------------------------------
-  var editingN = null;
-  function openList() { panel.classList.add("open"); if (!panel.style.left) { panel.style.right = "auto"; panel.style.left = (window.innerWidth - 350) + "px"; panel.style.top = (BAR_H + 12) + "px"; } renderList(); }
+  // editingClose is how the single Escape owner reaches the inline edit's close:
+  // that function is a per-row closure inside renderLiveList, so it cannot be
+  // called by name from out here. renderList() clears it and renderLiveList
+  // re-arms it, which keeps it non-null exactly while an edit is on screen.
+  var editingN = null, editingClose = null;
+  function openList() { panel.classList.add("open"); if (!panel.style.left) { panel.style.right = "auto"; panel.style.left = (window.innerWidth - 350) + "px"; panel.style.top = (BAR_H + 12) + "px"; } refreshHistoryCount(); renderList(); }
   function toggleList() { if (panel.classList.contains("open")) closeList(); else openList(); }
   function flashBox(n) {
     var a = anns.filter(function (x) { return x.n === n; })[0];
@@ -459,12 +520,39 @@
   }
   function updateCount() {
     bar.querySelector("#__ffb_cnt").textContent = anns.length;
-    panel.querySelector("#__ffb_ptitlecnt").textContent = anns.length;
+    panel.querySelector("#__ffb_livecnt").textContent = anns.length ? " (" + anns.length + ")" : "";
   }
   function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
 
   function hasIndexedDb() {
     try { return !!window.indexedDB; } catch (e) { return false; }
+  }
+
+  function historyIsAvailable() {
+    return typeof window.__FFB_HISTORY_LIST === "function" || hasIndexedDb();
+  }
+
+  // A tab shows its count only when there is something to count: an unknown count
+  // and an empty one both render as a bare label, never "(0)".
+  function updateHistoryCount() {
+    panel.querySelector("#__ffb_histcnt").textContent = historyCount ? " (" + historyCount + ")" : "";
+  }
+
+  // Fills in the History count without making the user visit the tab. The History
+  // tab runs its own load, so skip this while that one is in flight, and never let
+  // a result from here overwrite a count that landed in the meantime — the tab's
+  // load is the authoritative, fresher read and these two are not ordered.
+  function refreshHistoryCount() {
+    if (historyCount !== null || historyCountLoading || historyLoading || !historyIsAvailable()) return;
+    historyCountLoading = true;
+    historyStore.count().then(function (total) {
+      historyCountLoading = false;
+      if (historyCount !== null) return;
+      historyCount = Number(total) || 0;
+      updateHistoryCount();
+    }).catch(function () {
+      historyCountLoading = false;
+    });
   }
 
   var historyStore = (function () {
@@ -517,6 +605,22 @@
       return requestStore("readonly", function (store) { return store.get(id); });
     }
 
+    function listAll() {
+      if (typeof window.__FFB_HISTORY_LIST === "function") {
+        try { return Promise.resolve(window.__FFB_HISTORY_LIST()); } catch (e) { return Promise.reject(e); }
+      }
+      return requestStore("readonly", function (store) { return store.getAll(); }).then(function (records) {
+        return records.map(function (record) {
+          var meta = record.meta || {}, preview = "";
+          (Array.isArray(meta.items) ? meta.items : []).some(function (item) {
+            if (String(item.comment || "").trim()) { preview = item.comment; return true; }
+            return false;
+          });
+          return { id: record.id, ts: meta.ts, url: meta.url, count: (meta.items || []).length, preview: preview };
+        }).sort(function (a, b) { return (Date.parse(b.ts) || 0) - (Date.parse(a.ts) || 0); });
+      });
+    }
+
     return {
       archive: function (meta, pngBlob) {
         if (typeof window.__FFB_ARCHIVE === "function") {
@@ -530,20 +634,20 @@
         }
         return requestStore("readwrite", function (store) { return store.put({ id: meta.id, meta: meta, pngBlob: pngBlob }); });
       },
-      list: function () {
+      list: listAll,
+      // A count does not need the records. IndexedDB answers count() from the
+      // store's keys, so the archived screenshots are never part of the read,
+      // whereas list() hands back every record just to take .length. It matters
+      // here because the Live tab fills this count in too: refreshHistoryCount
+      // runs on a list open whenever the count is unknown — the first open, and
+      // again after a send resets it — not only when History is visited. The
+      // served mode has no count route, but its list is a metadata-only summary
+      // with no PNGs in it.
+      count: function () {
         if (typeof window.__FFB_HISTORY_LIST === "function") {
-          try { return Promise.resolve(window.__FFB_HISTORY_LIST()); } catch (e) { return Promise.reject(e); }
+          return listAll().then(function (rows) { return Array.isArray(rows) ? rows.length : 0; });
         }
-        return requestStore("readonly", function (store) { return store.getAll(); }).then(function (records) {
-          return records.map(function (record) {
-            var meta = record.meta || {}, preview = "";
-            (Array.isArray(meta.items) ? meta.items : []).some(function (item) {
-              if (String(item.comment || "").trim()) { preview = item.comment; return true; }
-              return false;
-            });
-            return { id: record.id, ts: meta.ts, url: meta.url, count: (meta.items || []).length, preview: preview };
-          }).sort(function (a, b) { return (Date.parse(b.ts) || 0) - (Date.parse(a.ts) || 0); });
-        });
+        return requestStore("readonly", function (store) { return store.count(); });
       },
       getMeta: function (id) {
         if (typeof window.__FFB_HISTORY_META === "function") {
@@ -562,9 +666,37 @@
 
   function renderList() {
     updateCount();
-    if (activeListTab === "history") { renderHistory(); return; }
-    clearHistoryThumbs();
-    renderLiveList();
+    editingClose = null;   // re-armed below if renderLiveList draws an open edit
+    if (activeListTab === "history") renderHistory();
+    else { clearHistoryThumbs(); renderLiveList(); }
+    renderTabActions();
+  }
+
+  function renderTabActions() {
+    var actions = panel.querySelector("#__ffb_tabact");
+    actions.innerHTML = "";
+    var add = function (label, onClick) {
+      var button = document.createElement("button");
+      button.className = "__ffb_btn";
+      button.style.padding = "3px 9px";
+      button.textContent = label;
+      button.onclick = onClick;
+      actions.appendChild(button);
+      return button;
+    };
+    if (activeListTab === "live") {
+      var liveCopy = add("Copy", function () { copyTextAndFlash(buildExport(), liveCopy); });
+      add("Clear", clearAll);
+      return;
+    }
+    if (historyDetailData && historyDetailData.id === historyDetailId) {
+      var detailCopy = add("Copy", function () {
+        if (historyDetailData && historyDetailData.id === historyDetailId) copyTextAndFlash(buildHistoryExport(historyDetailData.meta), detailCopy);
+      });
+      var detailShot = add("Copy screenshot", function () {
+        if (historyDetailData && historyDetailData.id === historyDetailId) copyHistoryScreenshot(historyDetailData.meta, historyDetailData.blob, detailShot);
+      });
+    }
   }
 
   function renderLiveList() {
@@ -589,11 +721,11 @@
           if (ta.value.trim() !== a.comment) confirmDiscard("Discard your changes?", function () { editingN = null; renderList(); });
           else { editingN = null; renderList(); }
         };
+        editingClose = closeEdit;   // Esc is resolved by the capture listener, which needs this
         item.querySelector(".__ffb_es").onclick = save;
         item.querySelector(".__ffb_ec").onclick = closeEdit;
         ta.addEventListener("keydown", function (e) {
           if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); }
-          else if (e.key === "Escape") { e.preventDefault(); closeEdit(); }
         });
       } else {
         item.innerHTML =
@@ -613,6 +745,7 @@
     if (historyObserver) { historyObserver.disconnect(); historyObserver = null; }
     historyObjectUrls.forEach(function (url) { URL.revokeObjectURL(url); });
     historyObjectUrls = [];
+    historyDetailData = null;
   }
 
   function appendHistoryBox(container, entry) {
@@ -631,8 +764,7 @@
 
   function closeHistoryLightbox() {
     if (!historyLightbox) return;
-    document.removeEventListener("keydown", historyLightbox.onKeydown);
-    historyLightbox.el.remove();
+    historyLightbox.remove();
     historyLightbox = null;
   }
 
@@ -654,11 +786,14 @@
     lightbox.appendChild(close);
     lightbox.appendChild(shot);
     root.appendChild(lightbox);
-    var onKeydown = function (event) { if (event.key === "Escape") closeHistoryLightbox(); };
-    historyLightbox = { el: lightbox, onKeydown: onKeydown };
+    // Esc while this is open closes the lightbox and nothing else — it must not
+    // reach the list, or the history detail view the lightbox was opened from
+    // would be discarded along with it. The capture-phase listener near the
+    // hotkey handler checks historyLightbox first, so this needs no listener of
+    // its own; it used to keep one on `document` purely to stop the event.
+    historyLightbox = lightbox;
     close.onclick = closeHistoryLightbox;
     lightbox.onclick = function (event) { if (event.target === lightbox) closeHistoryLightbox(); };
-    document.addEventListener("keydown", onKeydown);
   }
 
   function historyTime(ts) {
@@ -734,6 +869,8 @@
     ]).then(function (result) {
       var meta = result[0], blob = result[1], url = URL.createObjectURL(blob);
       if (historyDetailId !== id || activeListTab !== "history" || !panel.classList.contains("open")) { URL.revokeObjectURL(url); return; }
+      historyDetailData = { id: id, meta: meta, blob: blob };
+      renderTabActions();
       historyObjectUrls.push(url);
       itemsEl.innerHTML = "";
       var detail = document.createElement("div");
@@ -773,7 +910,7 @@
     clearHistoryThumbs();
     itemsEl.innerHTML = "";
     if (historyDetailId !== null) { renderHistoryDetail(historyDetailId); return; }
-    if (typeof window.__FFB_HISTORY_LIST !== "function" && !hasIndexedDb()) {
+    if (!historyIsAvailable()) {
       itemsEl.innerHTML = '<div class="__ffb_empty">History is available when Fast Feedback is served through the proxy.</div>';
       return;
     }
@@ -784,6 +921,8 @@
     itemsEl.innerHTML = '<div class="__ffb_loading"><div class="__ffb_spin"></div>Loading history…</div>';
     historyStore.list().then(function (rows) {
       historyRows = Array.isArray(rows) ? rows.slice().sort(function (a, b) { return (Date.parse(b.ts) || 0) - (Date.parse(a.ts) || 0); }) : [];
+      historyCount = historyRows.length;
+      updateHistoryCount();
       historyLoading = false;
       if (activeListTab === "history") renderList();
     }).catch(function () {
@@ -807,8 +946,6 @@
   function closeList() { historyDetailId = null; clearHistoryThumbs(); panel.classList.remove("open"); }
   panel.querySelector(".__ffb_x").onclick = closeList;
   panel.querySelector("#__ffb_psend").onclick = sendToAI;
-  panel.querySelector("#__ffb_pcopy").onclick = copyAll;
-  panel.querySelector("#__ffb_pclear").onclick = clearAll;
 
   // Clear wipes every committed annotation (and its box). Guarded by a confirm
   // since it's destructive and the boxes can't be recovered. Numbering restarts
@@ -833,13 +970,128 @@
     });
     return anns.length ? s : "(no feedback yet)";
   }
-  function copyAll() {
-    var text = buildExport();
+
+  function buildHistoryExport(meta) {
+    var items = Array.isArray(meta && meta.items) ? meta.items : [];
+    var s = "# Fast feedback (" + (meta && meta.url ? meta.url : "") + ")\n";
+    items.forEach(function (item) {
+      var r = item.region || {};
+      s += "- [" + item.n + "] " + item.sel + "  [x" + r.x + "% y" + r.y + "% w" + r.w + "% h" + r.h + "%]  " + (item.comment || "(no comment)") + "\n";
+    });
+    return items.length ? s : "(no feedback yet)";
+  }
+
+  // Saves and restores innerHTML so the label comes back exactly as it was. Every
+  // button flashed today has a plain-text label, but bar buttons can carry markup
+  // (the List button holds its count in a span), and a text-only restore would
+  // silently flatten one if this is ever pointed at it.
+  function flashButton(button, label) {
+    if (!button) return;
+    var prev = button.innerHTML; button.textContent = label;
+    setTimeout(function () { button.innerHTML = prev; }, 1200);
+  }
+
+  function copyTextAndFlash(text, button) {
     if (navigator.clipboard) navigator.clipboard.writeText(text).catch(function () { legacyCopy(text); });
     else legacyCopy(text);
-    var b = bar.querySelector("#__ffb_copybtn");
-    var prev = b.innerHTML; b.textContent = "Copied ✓";
-    setTimeout(function () { b.innerHTML = prev; }, 1200);
+    flashButton(button, "Copied ✓");
+  }
+
+  function downloadHistoryScreenshot(blob, button) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = "feedback-screenshot.png"; a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    flashButton(button, "Downloaded ✓");
+  }
+
+  // An archived PNG is captured with the boxes hidden (capturePng(true)), because
+  // History rebuilds them from meta.items as DOM overlays on top of the image.
+  // Copying the stored blob as-is would therefore hand back a screenshot with none
+  // of the numbered highlights the detail view is showing. Paint them back on,
+  // from the same percentage regions the DOM overlays use, so what you copy is
+  // what you were looking at. The box styling is mirrored from .__ffb_box and
+  // .__ffb_num rather than shared with them — canvas cannot use the CSS — so a
+  // change to those rules needs echoing here.
+  function composeHistoryShot(meta, blob) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(blob);
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var canvas = document.createElement("canvas");
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          var ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0);
+          // The PNG was rendered at the capturing display's devicePixelRatio, so
+          // the CSS-pixel constants below (2px border, 11px label) have to be
+          // multiplied by that ratio or they come out half/third size on a HiDPI
+          // screen. It cannot be derived from cap.w: that IS the PNG's own pixel
+          // width, so the ratio would always be exactly 1. cap.docW is the CSS
+          // width at capture time — the same basis captureRegion normalizes
+          // against. Archives written before docW was stored fall back to 1.
+          var cap = meta && meta.capture;
+          var cssW = cap ? Number(cap.docW) : 0;
+          var scale = cssW > 0 ? canvas.width / cssW : 1;
+          var cs = getComputedStyle(document.documentElement);
+          var gold = cs.getPropertyValue("--__ffb_gold").trim() || "#e8b23f";
+          var fill = cs.getPropertyValue("--__ffb_hlfill").trim() || "rgba(232,178,63,.14)";
+          var ink = cs.getPropertyValue("--__ffb_onaccent").trim() || "#231a00";
+          var items = Array.isArray(meta && meta.items) ? meta.items : [];
+          items.forEach(function (entry) {
+            var r = entry.region || {};
+            var x = (Number(r.x) / 100) * canvas.width, y = (Number(r.y) / 100) * canvas.height;
+            var w = (Number(r.w) / 100) * canvas.width, h = (Number(r.h) / 100) * canvas.height;
+            if (!isFinite(x) || !isFinite(y) || !isFinite(w) || !isFinite(h)) return;
+            ctx.fillStyle = fill;
+            ctx.fillRect(x, y, w, h);
+            ctx.lineWidth = 2 * scale;
+            ctx.strokeStyle = gold;
+            ctx.strokeRect(x + ctx.lineWidth / 2, y + ctx.lineWidth / 2, w - ctx.lineWidth, h - ctx.lineWidth);
+            var size = 11 * scale;
+            ctx.font = "800 " + size + "px system-ui,-apple-system,'Segoe UI',Roboto,sans-serif";
+            var label = String(entry.n);
+            var bw = ctx.measureText(label).width + 12 * scale, bh = size + 6 * scale;
+            ctx.fillStyle = gold;
+            ctx.fillRect(x, y, bw, bh);
+            ctx.fillStyle = ink;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(label, x + bw / 2, y + bh / 2);
+          });
+          URL.revokeObjectURL(url);
+          canvas.toBlob(function (out) { out ? resolve(out) : reject(new Error("toBlob returned nothing")); }, "image/png");
+        } catch (err) { URL.revokeObjectURL(url); reject(err); }
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error("could not decode the archived screenshot")); };
+      img.src = url;
+    });
+  }
+
+  // Falls back to the stored blob if compositing fails, so a copy still happens.
+  //
+  // The ClipboardItem is built synchronously from the *pending* composite, the
+  // same way shoot() does it. Awaiting the composite first and writing afterwards
+  // would run the write in a later task, without the click's transient user
+  // activation, and browsers that require activation reject it — so the copy would
+  // silently become a download every time.
+  function copyHistoryScreenshot(meta, blob, button) {
+    var blobPromise = composeHistoryShot(meta, blob).catch(function () { return blob; });
+    var fallback = function () { blobPromise.then(function (out) { downloadHistoryScreenshot(out, button); }); };
+    if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+      try {
+        navigator.clipboard.write([new ClipboardItem({ "image/png": blobPromise })])
+          .then(function () { flashButton(button, "Copied ✓"); })
+          .catch(fallback);
+      } catch (e) { fallback(); }
+    } else {
+      fallback();
+    }
+  }
+
+  function copyAll() {
+    copyTextAndFlash(buildExport(), bar.querySelector("#__ffb_copybtn"));
   }
   function legacyCopy(text) {
     var t = document.createElement("textarea"); t.value = text;
@@ -919,7 +1171,10 @@
           id: crypto.randomUUID(),
           ts: new Date().toISOString(),
           url: flushUrl,
-          capture: { w: capture.w, h: capture.h },
+          // docW is the document's CSS width at capture time; w is the rendered
+          // pixel width. Their ratio is the device-pixels-per-CSS-pixel factor,
+          // which the History composite needs to size its chrome (composeHistoryShot).
+          capture: { w: capture.w, h: capture.h, docW: capture.docW },
           items: snapshot.map(function (entry, index) {
             var item = items[index];
             return {
@@ -940,6 +1195,9 @@
       historyRows = null;
       historyError = false;
       historyVisibleCount = 10;
+      historyCount = null;
+      updateHistoryCount();
+      refreshHistoryCount();
       renderList();
       showToast((sentToInbox ? "Sent " : "Archived ") + items.length + " items ✓", false);
     }).catch(function () {
@@ -962,11 +1220,11 @@
   // copy tied to the button's user-gesture while the render finishes. If the
   // clipboard is blocked (permissions / not focused / unsupported, e.g. over
   // file://) we fall back to downloading the PNG so the shot is never lost.
-  // Serialize captures: capturePng mutates shared DOM state (hides chrome,
-  // removes the body spacer) and restores it on completion. Two overlapping
-  // captures — e.g. the Screenshot hotkey pressed during the Send flush's
-  // parallel capture — would each snapshot the OTHER's temporary state as the
-  // "original" and restore to it, leaving the overlay hidden / spacer removed.
+  // Serialize captures: capturePng mutates shared DOM state (it hides the
+  // chrome) and restores it on completion. Two overlapping captures — e.g. the
+  // Screenshot hotkey pressed during the Send flush's parallel capture — would
+  // each snapshot the OTHER's temporary state as the "original" and restore to
+  // it, leaving the overlay hidden.
   // Chain each capture after the previous one fully settles so they never overlap.
   var captureChain = Promise.resolve();
   var capturesInFlight = 0;   // running OR queued; Send bails if a capture is active (see sendToAI)
@@ -982,30 +1240,24 @@
   function capturePngNow(hideBoxes) {
     var h2c = window.html2canvas;
     if (typeof h2c !== "function") return Promise.reject(new Error("Screenshot needs the bundled html2canvas, which didn't load on this page."));
-    var chrome = [bar, panel, form, confirmEl, layer];
+    var chrome = [bar, panel, form, confirmEl, layer, arm];
     if (hideBoxes) chrome.push(boxwrap);
     var vis = chrome.map(function (n) { return n.style.visibility; });
     chrome.forEach(function (n) { n.style.visibility = "hidden"; });
-    var mt = document.body.style.marginTop;      // drop the top strip's spacer
-    var bodyTop = document.body.getBoundingClientRect().top;
-    document.body.style.marginTop = prevBodyMt;   // so there's no empty band
-    var captureShiftY = bodyTop - document.body.getBoundingClientRect().top;
     var restored = false;
     var restore = function () {
       if (restored) return; restored = true;
       chrome.forEach(function (n, i) { n.style.visibility = vis[i]; });
-      document.body.style.marginTop = mt;
     };
     // Freeze the document dimensions BEFORE html2canvas clones the DOM: the canvas
     // reflects the document at render start, so normalizing regions against a
-    // later live scrollWidth/Height (an SPA resize mid-render) would shift every
-    // box. Read after the spacer removal above so it matches the rendered canvas.
+    // later live scrollWidth/Height (an SPA resize mid-render) would shift every box.
     var captureDocW = document.documentElement.scrollWidth || 1;
     var captureDocH = document.documentElement.scrollHeight || 1;
     try {
       return Promise.resolve(h2c(document.documentElement, { backgroundColor: null, useCORS: true, logging: false, scale: window.devicePixelRatio || 1 }))
         .then(function (canvas) {
-          var capture = { w: canvas.width, h: canvas.height, docW: captureDocW, docH: captureDocH, shiftY: captureShiftY };
+          var capture = { w: canvas.width, h: canvas.height, docW: captureDocW, docH: captureDocH };
           restore();
           return new Promise(function (res, rej) {
             canvas.toBlob(function (blob) { blob ? res({ blob: blob, capture: capture }) : rej(new Error("toBlob returned null")); }, "image/png");
@@ -1029,7 +1281,7 @@
     var pct = function (v, total) { return Math.max(0, Math.min(100, Math.round((v / total) * 10000) / 100)); };
     return {
       x: pct(rect.left * scaleX, capture.w),
-      y: pct((rect.top - capture.shiftY) * scaleY, capture.h),
+      y: pct(rect.top * scaleY, capture.h),
       w: pct(rect.width * scaleX, capture.w),
       h: pct(rect.height * scaleY, capture.h)
     };
@@ -1354,11 +1606,13 @@
     '<div class="__ffb_hd2"><span class="__ffb_ttl">Settings</span><button class="__ffb_x" title="Close">✕</button></div>' +
     '<div class="__ffb_srows" id="__ffb_srows"></div>' +
     '<div class="__ffb_snote" id="__ffb_snote"></div>' +
+    '<div class="__ffb_verrow" id="__ffb_verrow"></div>' +
     '<div class="__ffb_setact"><button class="__ffb_btn" id="__ffb_hkreset">Reset to defaults</button><button class="__ffb_btn primary" id="__ffb_hkdone">Done</button></div>' +
     '</div>';
   root.appendChild(settingsEl);
   var srows = settingsEl.querySelector("#__ffb_srows");
   var snote = settingsEl.querySelector("#__ffb_snote");
+  var verrow = settingsEl.querySelector("#__ffb_verrow");
   var HINT = "Click a shortcut, then press your combo — Ctrl (or ⌘) plus optional Alt / Shift and a key. Esc cancels.";
   function setNote(msg, warn) { snote.textContent = msg; snote.className = "__ffb_snote" + (warn ? " warn" : ""); }
   var SUB = 'color:var(--__ffb_mut);font-weight:400';
@@ -1443,11 +1697,16 @@
       srows.appendChild(row);
     });
 
+    // The version renders into its own container below the shortcut hint, not into
+    // srows. Keeping it out of the scroll area means it and the hint stay pinned
+    // above the buttons together; the hint in particular has to stay put, since
+    // setNote() uses it for rebind prompts and conflict warnings.
+    verrow.innerHTML = "";
     var version = window.__FFB_VERSION;
     if (typeof version === "string" && version) {
       var sep3 = document.createElement("div");
       sep3.className = "__ffb_srow_sep";
-      srows.appendChild(sep3);
+      verrow.appendChild(sep3);
 
       var vrow = document.createElement("div");
       vrow.className = "__ffb_srow __ffb_version";
@@ -1467,7 +1726,7 @@
         vrow.appendChild(badge);
         vrow.appendChild(commands);
       }
-      srows.appendChild(vrow);
+      verrow.appendChild(vrow);
     }
   }
   function stopCapture() {
@@ -1506,6 +1765,46 @@
     hotkeys[capturing] = b; saveHotkeys(); updateHotkeyHints();
     var action = capturing; stopCapture();
     setNote("Set " + labelFor(action) + " → " + comboLabel(b) + ".", false);
+  }, true);
+
+  // ---- Escape ownership (capture phase) ---------------------------------
+  // Escape has to be claimed before the HOST page sees it. A host dialog or menu
+  // normally listens on `document` in the bubble phase, and that runs ahead of
+  // any window-level bubble listener — so resolving Escape down there let one
+  // key close the host's UI as well as ours.
+  //
+  // stopImmediatePropagation() from the capture phase at `window` keeps the
+  // event from reaching `document`, the target, the bubble phase, and any later
+  // listener on `window` itself. Nothing below can act on it, so this listener
+  // has to perform the action rather than defer — which is why it is the ONE
+  // place Escape is resolved.
+  //
+  // The one thing it cannot preempt is a host listener registered on `window` in
+  // the capture phase BEFORE the overlay loads: same target, same phase, earlier
+  // registration wins, and no script that loads later can get in front of it.
+  // That is a DOM ordering fact, not a bug to fix here. Measured: a host handler
+  // in any other position (document capture or bubble, window bubble) sees
+  // nothing; only that one still fires. Console/bookmarklet mode injects last,
+  // so it is the mode most exposed to it.
+  //
+  // Being the only owner is also what makes the state readable. Every earlier
+  // attempt to read `editingN` / `form.open` / `historyLightbox` from the bubble
+  // phase read state that a nearer handler had already mutated or detached — the
+  // bug behind three separate regressions on this branch. Here nothing in the
+  // bubble phase has run yet, so what these guards see is what is on screen.
+  window.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape" || capturing) return;   // a rebind capture owns every key
+    var claim = function (fn) { e.preventDefault(); e.stopImmediatePropagation(); fn(); };
+    // Innermost first. All of these share one z-index, so what you see on top is
+    // whatever was appended to `root` last — the lightbox, then the settings
+    // modal, then the confirm the form or the edit raised.
+    if (historyLightbox) return claim(closeHistoryLightbox);
+    if (settingsOpen) return claim(closeSettings);
+    if (confirmEl.classList.contains("open")) return claim(cancelConfirm);
+    if (form.classList.contains("open")) return claim(tryCloseForm);
+    if (panel.classList.contains("open") && editingClose) return claim(editingClose);
+    if (active) return claim(function () { setActive(false); });   // disarm Write before closing the list
+    if (panel.classList.contains("open")) return claim(closeList);
   }, true);
 
   // ---- custom tooltip (short text + keycap chips) -----------------------
@@ -1553,31 +1852,30 @@
   // The whole overlay can be hidden with Ctrl+. and brought back the same way,
   // so it stays out of the way when you're just using the app (important when
   // it's always injected — e.g. served through the dev proxy). The choice is
-  // remembered in localStorage so a reload keeps it as you left it. Disabling
-  // drops the top spacer too, so the page lays out exactly as it normally would.
+  // remembered in localStorage so a reload keeps it as you left it.
   var enabled = true;
   try { enabled = localStorage.getItem("__ffb_enabled") !== "0"; } catch (e) {}
   function setEnabled(v) {
     enabled = v;
     try { localStorage.setItem("__ffb_enabled", v ? "1" : "0"); } catch (e) {}
-    bar.style.display = v ? "flex" : "none";
+    syncBarVisibility();
     boxwrap.style.display = v ? "" : "none";
-    document.body.style.marginTop = v ? (BAR_H + "px") : prevBodyMt;
     if (!v) { closeList(); form.classList.remove("open"); confirmEl.classList.remove("open"); closeSettings(); setActive(false); }
   }
 
   // ---- hotkeys ----------------------------------------------------------
   // Bindings are configurable (⚙) and matched by modifiers + e.code. Defaults:
   // Ctrl+. show/hide · Ctrl+/ annotate · Ctrl+[ list · Ctrl+' copy · Ctrl+\\ send
-  // · Ctrl+; screenshot. Form-local Esc/Ctrl+Enter are handled on the textareas above.
+  // · Ctrl+; screenshot. Ctrl+Enter is handled on the textareas above; Escape is
+  // owned entirely by the capture-phase listener, so it never reaches here.
   window.addEventListener("keydown", function (e) {
-    if (settingsOpen) { if (e.key === "Escape" && !capturing) { e.preventDefault(); closeSettings(); } return; } // settings owns the keyboard
+    if (settingsOpen) return;   // settings owns the keyboard; its Esc is resolved in the capture listener above
     if (capturing) return;
-    // Esc disarms Write when it's armed and no annotation form is open.
-    if (e.key === "Escape" && active && !form.classList.contains("open")) { e.preventDefault(); setActive(false); return; }
+    var typing = /^(input|textarea|select)$/i.test((e.target && e.target.tagName) || "") || (e.target && e.target.isContentEditable);
+    // Escape never reaches here — the capture listener above resolves it before
+    // the host page can also act on it. Only the hotkey combos are left.
     var ctrl = e.ctrlKey || e.metaKey;
     if (!ctrl && !e.altKey && !e.shiftKey) return; // ignore plain keys
-    var typing = /^(input|textarea|select)$/i.test((e.target && e.target.tagName) || "") || (e.target && e.target.isContentEditable);
     for (var i = 0; i < HK_ORDER.length; i++) {
       var action = HK_ORDER[i][0], b = hotkeys[action];
       if (ctrl === b.ctrl && e.altKey === b.alt && e.shiftKey === b.shift && e.code === b.code) {
@@ -1597,11 +1895,10 @@
   });
 
   // ---- re-show hook (live mode paste-twice) -----------------------------
-  window.__ffb_show = function () { setEnabled(true); };
+  window.__ffb_show = function () { setEnabled(true); setActive(false); };
   window.__ffb_teardown = function () {
-    document.body.style.marginTop = prevBodyMt;
     clearHistoryThumbs();
-    [bar, toast, layer, boxwrap, form, panel, confirmEl, settingsEl, style].forEach(function (n) { if (n && n.remove) n.remove(); });
+    [bar, toast, arm, layer, boxwrap, form, panel, confirmEl, settingsEl, style].forEach(function (n) { if (n && n.remove) n.remove(); });
     window.__ffb_loaded = false;
   };
 

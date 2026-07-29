@@ -156,26 +156,49 @@ clipboard**. Tell the user: open the app tab → **F12 → Console** → **paste
 
 ## Annotating (both modes)
 
-A top strip appears at the very top of the page (the app is pushed down so the
-strip never overlaps its header): left shows `🖍 Feedback` + the file name,
-right shows the **Write / List / Copy All / Screenshot / ⚙** buttons. Button
-labels don't print their shortcut — the current combo is in each button's
+A top strip overlays the very top of the page without changing its layout or
+scroll height. It hides while Write is armed so the area beneath it can be
+annotated: left shows `🖍 Feedback` + the file name, right shows the **Write /
+List / Copy All / Screenshot / ⚙** buttons. Button labels don't print their
+shortcut — the current combo is in each button's
 **tooltip** (hover), kept in sync with whatever the shortcut is bound to. The
 user:
 - arms the highlight cursor — **Write** button or **Ctrl+/**. It's one-shot:
   after drawing one box it disarms, so no stray crosshair is left on. Pressing
-  **Esc** while it's armed disarms it too.
+  **Esc** while it's armed disarms it too. While it's armed the strip is gone,
+  so a small **"Write mode"** chip appears at the bottom-centre to say the
+  cursor is live and that **Esc** cancels; it disappears the moment you disarm.
+  An open feedback list hides along with the strip and comes back exactly as it
+  was — same scroll position, same place on screen — once you're done drawing.
 - **drags a box** over any part; a **draggable form pops up at that box**,
 - writes the fix and clicks **Submit** (or **Ctrl+Enter**) → the box is committed
   with a number and the list count goes up. Closing an unsaved box asks before
   discarding, so nothing is lost by accident.
-- opens the list — **List** button or **Ctrl+[** — titled **Feedback (n)**, where
-  each note shows as read-only text. Hovering a note reveals **✎ edit** and
-  **🗑 delete** (top-right of the card); a committed box also has a **🗑 on its
-  top-right corner**. Editing is inline; closing a changed edit asks before
-  reverting. Deleting asks first (**Cancel / Discard**).
-- the list header also has **Copy** and **Clear** — Clear wipes every note after a
-  confirm (**Cancel / Clear**) and restarts numbering at [1].
+- opens the list — **List** button or **Ctrl+[** — titled **Feedback**, with
+  a **Live** and a **History** tab. Each carries its own count (**Live (3)**,
+  **History (12)**); a tab with nothing in it just reads **Live** / **History**
+  rather than showing a zero. Each note shows as read-only text. **Esc** closes
+  the list, unless something nearer owns the key (an open form, a confirm, or a
+  note you're editing). When the overlay takes **Esc** it consumes it, so one Esc
+  won't close the list and your own dialog at the same time; when nothing of the
+  overlay's is open, Esc belongs to the app as usual. (One gap, and it can't be
+  closed from here: an app listening for Esc on `window` in the *capture* phase,
+  registered before the overlay loads, still gets the key — earlier registration
+  on the same target wins and no later script can preempt it. That mostly
+  affects console/bookmarklet mode, which injects last. Every other position —
+  `document` capture or bubble, `window` bubble — is covered.)
+  Hovering a note reveals **✎ edit** and **🗑 delete**
+  (top-right of the card) — delete turns red on hover so the destructive one is
+  obvious before you click it; a committed box also has a **🗑 on its top-right
+  corner**, grey until you hover it and then the same red.
+  Editing is inline; closing a changed edit asks before reverting. Deleting
+  asks first (**Cancel / Discard**).
+- the right-hand end of the tab row carries the actions for whatever is on screen.
+  On **Live** that's **Copy** and **Clear** — Clear wipes every note after a
+  confirm (**Cancel / Clear**) and restarts numbering at [1]. On the **History**
+  list there are none. With an archived batch open it's **Copy** (that batch's
+  feedback as text) and **Copy screenshot** (its PNG to the clipboard, falling
+  back to a download where the clipboard is blocked).
 - copies everything — **Copy All** button or **Ctrl+'** — and pastes it back.
 - **Screenshot** — **Screenshot** button or **Ctrl+;** — renders the page (with
   the annotation boxes in it, minus this overlay's own bar) to a PNG and copies
@@ -191,10 +214,10 @@ user:
   there is no server, so a "saved" shot downloads to the browser's Downloads
   folder instead.
 
-- shows/hides the **whole overlay** with **Ctrl+.** — the bar, boxes and top
-  spacer all disappear and the page behaves normally, so it stays out of the way
-  when you're just using the app. The choice is remembered (localStorage) across
-  reloads, which matters when it's always injected (e.g. via the dev proxy).
+- shows/hides the **whole overlay** with **Ctrl+.** — the bar and boxes
+  disappear, while the page behaves normally at all times, so it stays out of
+  the way when you're just using the app. The choice is remembered (localStorage)
+  across reloads, which matters when it's always injected (e.g. via the dev proxy).
 - opens **⚙ Settings** (a centered, non-draggable popup) for **theme**,
   **highlight color**, **screenshots**, and **hotkeys**:
   - **Theme** — Light / Dark, saved **per project** (keyed by the project's path)
@@ -222,7 +245,7 @@ write route); in console/bookmarklet mode changes persist via `localStorage` for
 that page.
 
 Hotkeys (defaults — all rebindable in ⚙): **Ctrl+.** show/hide · **Ctrl+/**
-annotate (**Esc** disarms) · **Ctrl+[** list · **Ctrl+'** copy · **Ctrl+;**
+annotate (**Esc** disarms) · **Ctrl+[** list (**Esc** closes) · **Ctrl+'** copy · **Ctrl+;**
 screenshot · **Ctrl+Backslash** Send · in a form **Ctrl+Enter** submit / **Esc** cancel.
 
 ## Feedback format you will receive
