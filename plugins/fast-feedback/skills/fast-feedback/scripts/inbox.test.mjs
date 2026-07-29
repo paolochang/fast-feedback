@@ -47,7 +47,7 @@ test("writeSession and readSession use exactly one .ffb directory segment", { co
   try {
     delete process.env.FFB_INBOX;
     process.chdir(root);
-    const first = { mode: "static", version: "0.3.0", url: "http://127.0.0.1:5000", started_at: "2026-07-28T12:00:00.000Z" };
+    const first = { id: "first-session", mode: "static", version: "0.3.0", url: "http://127.0.0.1:5000", started_at: "2026-07-28T12:00:00.000Z" };
     await writeSession(first);
     assert.deepEqual(await readSession(), first);
     assert.equal(inboxPath(), join(root, ".ffb"));

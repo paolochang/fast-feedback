@@ -23,6 +23,7 @@
 
 import http from "node:http";
 import net from "node:net";
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { inboxPath, writeSession } from "./inbox.mjs";
 import { isLoopbackHost } from "./proxy-guards.mjs";
@@ -58,11 +59,12 @@ if (targetUrl.protocol !== "http:") {
   process.exit(1);
 }
 const PORT = parseInt(opt("--port", "5000"), 10);
+const SESSION_ID = randomUUID();
 const THOST = targetUrl.hostname;
 const TPORT = targetUrl.port || "80";
 
 const server = http.createServer(function (creq, cres) {
-  if (handleFfbRoute(creq, cres, { port: server.address().port, mode: "proxy" })) return;
+  if (handleFfbRoute(creq, cres, { port: server.address().port, mode: "proxy", id: SESSION_ID })) return;
 
   // Forward to the dev server. Rewrite Host so vhost-based dev servers answer,
   // and force identity encoding so HTML comes back uncompressed (we inject into
@@ -126,7 +128,7 @@ server.on("upgrade", function (creq, csocket, head) {
 await ensureVersionChecked();
 server.listen(PORT, "127.0.0.1", async function () {
   const url = "http://127.0.0.1:" + server.address().port;
-  await writeSession({ mode: "proxy", version: PLUGIN_VERSION, url, started_at: new Date().toISOString() }).catch(() => {});
+  await writeSession({ id: SESSION_ID, mode: "proxy", version: PLUGIN_VERSION, url, started_at: new Date().toISOString() }).catch(() => {});
   console.log("fast-feedback proxy running:");
   console.log("  inbox: " + inboxPath());
   console.log("  http://localhost:" + PORT + "  →  " + target);

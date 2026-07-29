@@ -69,9 +69,9 @@ async function sessionServerStatus() {
     return { state: "not_responding", mode: session.mode, url: session.url, started_at: session.started_at };
   }
   try {
-    const response = await fetch(new URL("/__ffb__/ping", sessionUrl), { signal: AbortSignal.timeout(300) });
+    const response = await fetch(new URL("/__ffb__/ping", sessionUrl), { signal: AbortSignal.timeout(300), redirect: "manual" });
     const ping = await response.json();
-    if (response.ok && ping?.ffb === true) {
+    if (response.ok && ping?.ffb === true && ping?.id === session.id) {
       return { state: "running", mode: session.mode, url: session.url, started_at: session.started_at };
     }
   } catch {}

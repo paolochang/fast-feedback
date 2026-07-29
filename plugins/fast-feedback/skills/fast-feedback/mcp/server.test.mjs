@@ -220,7 +220,7 @@ test("ffb_status does not probe non-loopback session markers", { concurrency: fa
     try {
       const started_at = "2026-07-28T12:00:00.000Z";
       const url = "http://example.invalid:4321";
-      await writeSession({ mode: "static", version: "0.3.0", url, started_at });
+      await writeSession({ id: "non-loopback", mode: "static", version: "0.3.0", url, started_at });
 
       const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
       assert.deepEqual(status.server, { state: "not_responding", mode: "static", url, started_at });
@@ -246,7 +246,7 @@ test("ffb_status degrades malformed session marker URLs without probing", { conc
     try {
       const started_at = "2026-07-28T12:00:00.000Z";
       const url = "not-a-valid-url";
-      await writeSession({ mode: "static", version: "0.3.0", url, started_at });
+      await writeSession({ id: "malformed-url", mode: "static", version: "0.3.0", url, started_at });
 
       const result = await toolCall("ffb_status");
       assert.equal(result.result.isError, false);
@@ -267,13 +267,14 @@ test("ffb_status probes loopback session markers", { concurrency: false }, async
     const previousFetch = globalThis.fetch;
     const requested = [];
     process.env.FFB_NO_UPDATE_CHECK = "1";
-    globalThis.fetch = async (url) => {
+    globalThis.fetch = async (url, options) => {
       requested.push(String(url));
-      return { ok: true, json: async () => ({ ffb: true }) };
+      assert.equal(options.redirect, "manual");
+      return { ok: true, json: async () => ({ ffb: true, id: "loopback-session" }) };
     };
     try {
       for (const url of ["http://127.0.0.1:4321", "http://localhost:4321", "http://[::1]:4321"]) {
-        await writeSession({ mode: "static", version: "0.3.0", url, started_at: "2026-07-28T12:00:00.000Z" });
+        await writeSession({ id: "loopback-session", mode: "static", version: "0.3.0", url, started_at: "2026-07-28T12:00:00.000Z" });
         const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
         assert.equal(status.server.state, "running");
       }
@@ -298,12 +299,12 @@ test("ffb_status reports marker liveness and only hints when not running", { con
 
     const server = http.createServer((request, response) => {
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ ffb: true, mode: "static" }));
+      response.end(JSON.stringify({ ffb: true, mode: "static", id: "matching-session" }));
     });
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     const url = "http://127.0.0.1:" + server.address().port;
     try {
-      await writeSession({ mode: "static", version: "0.3.0", url, started_at: "2026-07-28T12:00:00.000Z" });
+      await writeSession({ id: "matching-session", mode: "static", version: "0.3.0", url, started_at: "2026-07-28T12:00:00.000Z" });
       const running = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
       assert.deepEqual(running.server, { state: "running", mode: "static", url, started_at: "2026-07-28T12:00:00.000Z" });
       assert.equal(running.hint, undefined);
@@ -318,7 +319,7 @@ test("ffb_status reports marker liveness and only hints when not running", { con
     await new Promise((resolve) => foreign.listen(0, "127.0.0.1", resolve));
     const foreignUrl = "http://127.0.0.1:" + foreign.address().port;
     try {
-      await writeSession({ mode: "static", version: "0.3.0", url: foreignUrl, started_at: "2026-07-28T12:00:00.000Z" });
+      await writeSession({ id: "foreign-session", mode: "static", version: "0.3.0", url: foreignUrl, started_at: "2026-07-28T12:00:00.000Z" });
       const foreignStatus = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
       assert.deepEqual(foreignStatus.server, { state: "not_responding", mode: "static", url: foreignUrl, started_at: "2026-07-28T12:00:00.000Z" });
       assert.ok(foreignStatus.hint);
@@ -331,6 +332,57 @@ test("ffb_status reports marker liveness and only hints when not running", { con
     assert.ok(Date.now() - started < 1000);
     assert.deepEqual(stopped.server, { state: "not_responding", mode: "static", url: foreignUrl, started_at: "2026-07-28T12:00:00.000Z" });
     assert.ok(stopped.hint);
+  });
+});
+
+test("ffb_status rejects a different ffb server identity and includes the inbox hint", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    const server = http.createServer((request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ffb: true, mode: "static", id: "server-y" }));
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const url = "http://127.0.0.1:" + server.address().port;
+    try {
+      await writeSession({ id: "server-x", mode: "static", version: "0.3.0", url, started_at: "2026-07-28T12:00:00.000Z" });
+      const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+      assert.deepEqual(status.server, { state: "not_responding", mode: "static", url, started_at: "2026-07-28T12:00:00.000Z" });
+      assert.ok(status.hint);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+});
+
+test("ffb_status does not follow a loopback ping redirect", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    const previousNoUpdateCheck = process.env.FFB_NO_UPDATE_CHECK;
+    process.env.FFB_NO_UPDATE_CHECK = "1";
+    let remoteRequests = 0;
+    const remote = http.createServer((request, response) => {
+      remoteRequests++;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ffb: true, id: "redirect-session" }));
+    });
+    await new Promise((resolve) => remote.listen(0, "127.0.0.1", resolve));
+    const remoteUrl = "http://127.0.0.1:" + remote.address().port + "/remote";
+    const redirector = http.createServer((request, response) => {
+      response.writeHead(302, { location: remoteUrl });
+      response.end();
+    });
+    await new Promise((resolve) => redirector.listen(0, "127.0.0.1", resolve));
+    const url = "http://127.0.0.1:" + redirector.address().port;
+    try {
+      await writeSession({ id: "redirect-session", mode: "static", version: "0.3.0", url, started_at: "2026-07-28T12:00:00.000Z" });
+      const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+      assert.deepEqual(status.server, { state: "not_responding", mode: "static", url, started_at: "2026-07-28T12:00:00.000Z" });
+      assert.equal(remoteRequests, 0);
+    } finally {
+      await new Promise((resolve) => redirector.close(resolve));
+      await new Promise((resolve) => remote.close(resolve));
+      if (previousNoUpdateCheck === undefined) delete process.env.FFB_NO_UPDATE_CHECK;
+      else process.env.FFB_NO_UPDATE_CHECK = previousNoUpdateCheck;
+    }
   });
 });
 

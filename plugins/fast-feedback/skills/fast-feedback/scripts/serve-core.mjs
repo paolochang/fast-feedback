@@ -81,9 +81,9 @@ export function injectBoot(html, boot) {
 // server), so stripping them here is fine.
 export const STRIP = new Set(["x-frame-options", "content-security-policy", "content-security-policy-report-only"]);
 
-export function handleFfbRoute(creq, cres, { port, mode = "static" }) {
+export function handleFfbRoute(creq, cres, { port, mode = "static", id }) {
   if (creq.method === "GET" && creq.url === "/__ffb__/ping") {
-    sendJson(cres, 200, { ffb: true, mode });
+    sendJson(cres, 200, { ffb: true, mode, id });
     return true;
   }
 

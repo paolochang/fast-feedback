@@ -3,6 +3,7 @@
 
 import http from "node:http";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createReadStream, readFileSync, statSync } from "node:fs";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { handleFfbRoute, injectBoot, renderBoot } from "./serve-core.mjs";
@@ -21,6 +22,7 @@ const argv = process.argv.slice(2);
 const portIndex = argv.indexOf("--port");
 const input = argv.find((arg, index) => (portIndex < 0 || (index !== portIndex && index !== portIndex + 1)) && !arg.startsWith("-"));
 const PORT = Number(portIndex >= 0 ? argv[portIndex + 1] : "5000");
+const SESSION_ID = randomUUID();
 
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
   console.error("Port must be an integer between 1 and 65535");
@@ -104,7 +106,7 @@ function openInBrowser(url) {
 }
 
 const server = http.createServer((creq, cres) => {
-  if (handleFfbRoute(creq, cres, { port: server.address().port, mode: "static" })) return;
+  if (handleFfbRoute(creq, cres, { port: server.address().port, mode: "static", id: SESSION_ID })) return;
 
   const requestPath = (creq.url || "/").split("?", 1)[0];
   let urlPath;
@@ -165,7 +167,7 @@ const server = http.createServer((creq, cres) => {
 await ensureVersionChecked();
 server.listen(PORT, "127.0.0.1", async () => {
   const url = "http://127.0.0.1:" + server.address().port;
-  await writeSession({ mode: "static", version: PLUGIN_VERSION, url, started_at: new Date().toISOString() }).catch(() => {});
+  await writeSession({ id: SESSION_ID, mode: "static", version: PLUGIN_VERSION, url, started_at: new Date().toISOString() }).catch(() => {});
   // Open/advertise the document by its filename, not "/", so location.href
   // carries the name. overlay.js serializes location.href into each Send item,
   // so this is what lets the receiving agent attribute file-mode feedback to

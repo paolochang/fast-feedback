@@ -20,9 +20,9 @@ function request({ port, method = "POST", path = "/__ffb__/send", headers = {}, 
   });
 }
 
-async function startServer() {
+async function startServer(id = "test-session") {
   const server = http.createServer((request, response) => {
-    if (!core.handleFfbRoute(request, response, { port: server.address().port })) {
+    if (!core.handleFfbRoute(request, response, { port: server.address().port, id })) {
       response.writeHead(404);
       response.end();
     }
@@ -54,12 +54,12 @@ test("handleFfbRoute rejects /send without the token", async () => {
   }
 });
 
-test("handleFfbRoute serves an unauthenticated ping but keeps send token-protected", async () => {
+test("handleFfbRoute serves an unauthenticated ping with only its opaque identity", async () => {
   const server = await startServer();
   try {
     const ping = await request({ port: server.address().port, method: "GET", path: "/__ffb__/ping" });
     assert.equal(ping.status, 200);
-    assert.deepEqual(JSON.parse(ping.body), { ffb: true, mode: "static" });
+    assert.deepEqual(JSON.parse(ping.body), { ffb: true, mode: "static", id: "test-session" });
     const send = await request({ port: server.address().port, body: "[]", headers: { "content-type": "application/json" } });
     assert.equal(send.status, 403);
   } finally {

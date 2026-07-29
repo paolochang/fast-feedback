@@ -5,6 +5,7 @@ import test from "node:test";
 import { parseSession, renderSession } from "./session.mjs";
 
 const session = {
+  id: "session-identity",
   mode: "static",
   version: "0.3.0",
   url: "http://127.0.0.1:5000",
@@ -15,9 +16,11 @@ test("renderSession and parseSession round-trip an injected timestamp", () => {
   assert.deepEqual(parseSession(renderSession(session)), session);
 });
 
-test("parseSession returns null for malformed JSON and missing fields", () => {
+test("parseSession returns null for malformed JSON or an invalid session id", () => {
   assert.equal(parseSession("not JSON"), null);
   assert.equal(parseSession(JSON.stringify({ ...session, mode: undefined })), null);
+  assert.equal(parseSession(JSON.stringify({ ...session, id: undefined })), null);
+  assert.equal(parseSession(JSON.stringify({ ...session, id: 1 })), null);
 });
 
 test("session helpers do not read a clock or process state", async () => {
