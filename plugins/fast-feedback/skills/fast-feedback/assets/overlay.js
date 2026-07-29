@@ -934,8 +934,10 @@
     return items.length ? s : "(no feedback yet)";
   }
 
-  // Restores innerHTML rather than textContent because the bar's Copy All label
-  // carries markup that a text-only restore would flatten.
+  // Saves and restores innerHTML so the label comes back exactly as it was. Every
+  // button flashed today has a plain-text label, but bar buttons can carry markup
+  // (the List button holds its count in a span), and a text-only restore would
+  // silently flatten one if this is ever pointed at it.
   function flashButton(button, label) {
     if (!button) return;
     var prev = button.innerHTML; button.textContent = label;
