@@ -498,7 +498,11 @@
   }
   fTa.addEventListener("keydown", function (e) {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submitForm(); }
-    else if (e.key === "Escape") { e.preventDefault(); tryCloseForm(); }
+    // The form owns Esc while it is open, so the event stops here rather than
+    // continuing to the window handler and closing the list behind it. The window
+    // side cannot tell: tryCloseForm() has already dropped the form's "open" class
+    // by the time the event would arrive, so the guard there sees no open form.
+    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); tryCloseForm(); }
   });
 
   // ---- list (read-only + inline edit) ----------------------------------
@@ -668,7 +672,7 @@
         if (historyDetailData && historyDetailData.id === historyDetailId) copyTextAndFlash(buildHistoryExport(historyDetailData.meta), detailCopy);
       });
       var detailShot = add("Copy screenshot", function () {
-        if (historyDetailData && historyDetailData.id === historyDetailId) copyHistoryScreenshot(historyDetailData.blob, detailShot);
+        if (historyDetailData && historyDetailData.id === historyDetailId) copyHistoryScreenshot(historyDetailData.meta, historyDetailData.blob, detailShot);
       });
     }
   }
@@ -699,7 +703,13 @@
         item.querySelector(".__ffb_ec").onclick = closeEdit;
         ta.addEventListener("keydown", function (e) {
           if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); }
-          else if (e.key === "Escape") { e.preventDefault(); closeEdit(); }
+          // The edit owns Esc while it is open, so stop it here: it would otherwise
+          // reach the window handler and close the whole list as well. That cannot
+          // be guarded on the window side — closeEdit() re-renders the list, so by
+          // the time the event gets there this textarea has been detached and both
+          // `editingN` and a "is the target inside the panel" test read as if no
+          // edit was ever open.
+          else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeEdit(); }
         });
       } else {
         item.innerHTML =
@@ -982,18 +992,77 @@
     flashButton(button, "Downloaded ✓");
   }
 
-  // The blob is already resolved here, so it goes to the clipboard directly —
-  // shoot() passes a promise instead because its capture is still rendering.
-  function copyHistoryScreenshot(blob, button) {
-    if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
-      try {
-        navigator.clipboard.write([new ClipboardItem({ "image/png": blob })])
-          .then(function () { flashButton(button, "Copied ✓"); })
-          .catch(function () { downloadHistoryScreenshot(blob, button); });
-      } catch (e) { downloadHistoryScreenshot(blob, button); }
-    } else {
-      downloadHistoryScreenshot(blob, button);
-    }
+  // An archived PNG is captured with the boxes hidden (capturePng(true)), because
+  // History rebuilds them from meta.items as DOM overlays on top of the image.
+  // Copying the stored blob as-is would therefore hand back a screenshot with none
+  // of the numbered highlights the detail view is showing. Paint them back on,
+  // from the same percentage regions the DOM overlays use, so what you copy is
+  // what you were looking at. The box styling is mirrored from .__ffb_box and
+  // .__ffb_num rather than shared with them — canvas cannot use the CSS — so a
+  // change to those rules needs echoing here.
+  function composeHistoryShot(meta, blob) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(blob);
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var canvas = document.createElement("canvas");
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          var ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0);
+          // The archive may be captured at a different pixel ratio than it was
+          // laid out at, so scale the chrome to match rather than hard-coding px.
+          var cap = meta && meta.capture;
+          var scale = cap && Number(cap.w) ? canvas.width / Number(cap.w) : 1;
+          var cs = getComputedStyle(document.documentElement);
+          var gold = cs.getPropertyValue("--__ffb_gold").trim() || "#e8b23f";
+          var fill = cs.getPropertyValue("--__ffb_hlfill").trim() || "rgba(232,178,63,.14)";
+          var ink = cs.getPropertyValue("--__ffb_onaccent").trim() || "#231a00";
+          var items = Array.isArray(meta && meta.items) ? meta.items : [];
+          items.forEach(function (entry) {
+            var r = entry.region || {};
+            var x = (Number(r.x) / 100) * canvas.width, y = (Number(r.y) / 100) * canvas.height;
+            var w = (Number(r.w) / 100) * canvas.width, h = (Number(r.h) / 100) * canvas.height;
+            if (!isFinite(x) || !isFinite(y) || !isFinite(w) || !isFinite(h)) return;
+            ctx.fillStyle = fill;
+            ctx.fillRect(x, y, w, h);
+            ctx.lineWidth = 2 * scale;
+            ctx.strokeStyle = gold;
+            ctx.strokeRect(x + ctx.lineWidth / 2, y + ctx.lineWidth / 2, w - ctx.lineWidth, h - ctx.lineWidth);
+            var size = 11 * scale;
+            ctx.font = "800 " + size + "px system-ui,-apple-system,'Segoe UI',Roboto,sans-serif";
+            var label = String(entry.n);
+            var bw = ctx.measureText(label).width + 12 * scale, bh = size + 6 * scale;
+            ctx.fillStyle = gold;
+            ctx.fillRect(x, y, bw, bh);
+            ctx.fillStyle = ink;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(label, x + bw / 2, y + bh / 2);
+          });
+          URL.revokeObjectURL(url);
+          canvas.toBlob(function (out) { out ? resolve(out) : reject(new Error("toBlob returned nothing")); }, "image/png");
+        } catch (err) { URL.revokeObjectURL(url); reject(err); }
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error("could not decode the archived screenshot")); };
+      img.src = url;
+    });
+  }
+
+  // Falls back to the stored blob if compositing fails, so a copy still happens.
+  function copyHistoryScreenshot(meta, blob, button) {
+    composeHistoryShot(meta, blob).catch(function () { return blob; }).then(function (out) {
+      if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+        try {
+          navigator.clipboard.write([new ClipboardItem({ "image/png": out })])
+            .then(function () { flashButton(button, "Copied ✓"); })
+            .catch(function () { downloadHistoryScreenshot(out, button); });
+        } catch (e) { downloadHistoryScreenshot(out, button); }
+      } else {
+        downloadHistoryScreenshot(out, button);
+      }
+    });
   }
 
   function copyAll() {
@@ -1736,12 +1805,14 @@
     var typing = /^(input|textarea|select)$/i.test((e.target && e.target.tagName) || "") || (e.target && e.target.isContentEditable);
     // Esc disarms Write when it's armed and no annotation form is open.
     if (e.key === "Escape" && active && !form.classList.contains("open")) { e.preventDefault(); setActive(false); return; }
-    // Esc then closes the list, but only when nothing nearer owns the key: the
-    // annotation form, a confirm dialog, an inline note edit, or any field being
-    // typed in. The inline-edit textarea handles Esc itself but doesn't stop
-    // propagation, so `typing` is what keeps one Esc from cancelling the edit
-    // AND closing the list out from under it.
-    if (e.key === "Escape" && panel.classList.contains("open") && !form.classList.contains("open") && !confirmEl.classList.contains("open") && editingN === null && !typing) { e.preventDefault(); closeList(); return; }
+    // Esc then closes the list. Everything nearer that wants the key claims it
+    // before this: the settings dialog returns above, the annotation form and the
+    // inline note edit stop the event on their own textareas, and a confirm is
+    // checked here. Deliberately NOT guarded on "is a field focused" — a field on
+    // the host page has no claim on this key, and treating it as one made Esc do
+    // nothing whenever the list had been opened by hotkey from a focused host
+    // input, which is exactly the case where the mouse was never used at all.
+    if (e.key === "Escape" && panel.classList.contains("open") && !form.classList.contains("open") && !confirmEl.classList.contains("open") && editingN === null) { e.preventDefault(); closeList(); return; }
     var ctrl = e.ctrlKey || e.metaKey;
     if (!ctrl && !e.altKey && !e.shiftKey) return; // ignore plain keys
     for (var i = 0; i < HK_ORDER.length; i++) {
