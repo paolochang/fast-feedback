@@ -362,6 +362,33 @@ test("ffb_status finds the surviving server after a later same-inbox server stop
   });
 });
 
+test("ffb_status finds an oldest server after nine newer markers stop", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    const live = http.createServer((request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ffb: true, id: "oldest-live-server" }));
+    });
+    await new Promise((resolve) => live.listen(0, "127.0.0.1", resolve));
+    const liveUrl = "http://127.0.0.1:" + live.address().port;
+    try {
+      await writeSession({ id: "oldest-live-server", mode: "static", version: "0.3.0", url: liveUrl, started_at: "2026-07-28T12:00:00.000Z" });
+      for (let index = 1; index <= 9; index += 1) {
+        const dead = http.createServer();
+        await new Promise((resolve) => dead.listen(0, "127.0.0.1", resolve));
+        const deadUrl = "http://127.0.0.1:" + dead.address().port;
+        await new Promise((resolve) => dead.close(resolve));
+        await writeSession({ id: "dead-server-" + index, mode: "static", version: "0.3.0", url: deadUrl, started_at: "2026-07-28T12:00:" + String(index).padStart(2, "0") + ".000Z" });
+      }
+
+      const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+      assert.deepEqual(status.server, { state: "running", mode: "static", url: liveUrl, started_at: "2026-07-28T12:00:00.000Z" });
+      assert.equal(status.hint, undefined);
+    } finally {
+      await new Promise((resolve) => live.close(resolve));
+    }
+  });
+});
+
 test("ffb_status accepts a legacy single-server marker", { concurrency: false }, async () => {
   await withInbox(async (inbox) => {
     const server = http.createServer((request, response) => {

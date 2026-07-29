@@ -71,7 +71,7 @@ test("writeSession and readSessions use exactly one .ffb directory segment", { c
   }
 });
 
-test("writeSession replaces a prior server on its URL and retains only eight newest markers", async () => {
+test("writeSession replaces a prior server on its URL while retaining other markers", async () => {
   await withInbox(async () => {
     for (let index = 0; index < 9; index += 1) {
       await writeSession({
@@ -82,11 +82,11 @@ test("writeSession replaces a prior server on its URL and retains only eight new
         started_at: "2026-07-28T12:00:0" + index + ".000Z",
       });
     }
-    assert.deepEqual((await readSessions()).map(({ id }) => id), ["session-1", "session-2", "session-3", "session-4", "session-5", "session-6", "session-7", "session-8"]);
+    assert.deepEqual((await readSessions()).map(({ id }) => id), ["session-0", "session-1", "session-2", "session-3", "session-4", "session-5", "session-6", "session-7", "session-8"]);
 
     const restarted = { id: "restarted", mode: "proxy", version: "0.3.0", url: "http://127.0.0.1:5008", started_at: "2026-07-28T12:01:00.000Z" };
     await writeSession(restarted);
-    assert.deepEqual((await readSessions()).map(({ id }) => id), ["session-1", "session-2", "session-3", "session-4", "session-5", "session-6", "session-7", "restarted"]);
+    assert.deepEqual((await readSessions()).map(({ id }) => id), ["session-0", "session-1", "session-2", "session-3", "session-4", "session-5", "session-6", "session-7", "restarted"]);
   });
 });
 

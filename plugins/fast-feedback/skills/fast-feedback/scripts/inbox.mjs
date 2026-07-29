@@ -95,7 +95,7 @@ export async function readSessions() {
   } catch {
     // The legacy marker is optional.
   }
-  return sessions.sort((left, right) => left.started_at.localeCompare(right.started_at)).slice(-8);
+  return sessions.sort((left, right) => left.started_at.localeCompare(right.started_at));
 }
 
 async function recoverAbandonedClaims(pendingDir) {
