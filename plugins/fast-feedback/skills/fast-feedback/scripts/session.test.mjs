@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { parseSession, renderSession } from "./session.mjs";
+import { parseSessions, renderSessions } from "./session.mjs";
 
 const session = {
   id: "session-identity",
@@ -12,15 +12,15 @@ const session = {
   started_at: "2026-07-28T12:00:00.000Z",
 };
 
-test("renderSession and parseSession round-trip an injected timestamp", () => {
-  assert.deepEqual(parseSession(renderSession(session)), session);
+test("renderSessions and parseSessions round-trip valid sessions", () => {
+  assert.deepEqual(parseSessions(renderSessions([session])), [session]);
 });
 
-test("parseSession returns null for malformed JSON or an invalid session id", () => {
-  assert.equal(parseSession("not JSON"), null);
-  assert.equal(parseSession(JSON.stringify({ ...session, mode: undefined })), null);
-  assert.equal(parseSession(JSON.stringify({ ...session, id: undefined })), null);
-  assert.equal(parseSession(JSON.stringify({ ...session, id: 1 })), null);
+test("parseSessions accepts legacy markers and drops invalid entries", () => {
+  assert.deepEqual(parseSessions(JSON.stringify(session)), [session]);
+  assert.deepEqual(parseSessions(JSON.stringify({ sessions: [session, { ...session, id: undefined }, { ...session, id: 1 }] })), [session]);
+  assert.deepEqual(parseSessions("not JSON"), []);
+  assert.deepEqual(parseSessions(JSON.stringify({ sessions: session })), []);
 });
 
 test("session helpers do not read a clock or process state", async () => {

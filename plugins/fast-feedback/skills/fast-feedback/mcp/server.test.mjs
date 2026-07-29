@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -280,6 +280,9 @@ test("ffb_status probes loopback session markers", { concurrency: false }, async
       }
       assert.deepEqual(requested, [
         "http://127.0.0.1:4321/__ffb__/ping",
+        "http://127.0.0.1:4321/__ffb__/ping",
+        "http://localhost:4321/__ffb__/ping",
+        "http://127.0.0.1:4321/__ffb__/ping",
         "http://localhost:4321/__ffb__/ping",
         "http://[::1]:4321/__ffb__/ping",
       ]);
@@ -332,6 +335,73 @@ test("ffb_status reports marker liveness and only hints when not running", { con
     assert.ok(Date.now() - started < 1000);
     assert.deepEqual(stopped.server, { state: "not_responding", mode: "static", url: foreignUrl, started_at: "2026-07-28T12:00:00.000Z" });
     assert.ok(stopped.hint);
+  });
+});
+
+test("ffb_status finds the surviving server after a later same-inbox server stops", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    const startServer = async (id) => {
+      const server = http.createServer((request, response) => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ ffb: true, id }));
+      });
+      await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+      return { server, url: "http://127.0.0.1:" + server.address().port };
+    };
+    const first = await startServer("first-server");
+    const second = await startServer("second-server");
+    try {
+      await writeSession({ id: "first-server", mode: "static", version: "0.3.0", url: first.url, started_at: "2026-07-28T12:00:00.000Z" });
+      await writeSession({ id: "second-server", mode: "static", version: "0.3.0", url: second.url, started_at: "2026-07-28T12:00:01.000Z" });
+      await new Promise((resolve) => second.server.close(resolve));
+
+      const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+      assert.deepEqual(status.server, { state: "running", mode: "static", url: first.url, started_at: "2026-07-28T12:00:00.000Z" });
+      assert.equal(status.hint, undefined);
+    } finally {
+      if (second.server.listening) await new Promise((resolve) => second.server.close(resolve));
+      await new Promise((resolve) => first.server.close(resolve));
+    }
+  });
+});
+
+test("ffb_status accepts a legacy single-server marker", { concurrency: false }, async () => {
+  await withInbox(async (inbox) => {
+    const server = http.createServer((request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ffb: true, id: "legacy-server" }));
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const url = "http://127.0.0.1:" + server.address().port;
+    try {
+      await writeFile(join(inbox, "session.json"), JSON.stringify({ id: "legacy-server", mode: "static", version: "0.3.0", url, started_at: "2026-07-28T12:00:00.000Z" }));
+      const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+      assert.deepEqual(status.server, { state: "running", mode: "static", url, started_at: "2026-07-28T12:00:00.000Z" });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+});
+
+test("ffb_status probes dead session markers concurrently", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    const servers = await Promise.all(["dead-one", "dead-two", "dead-three"].map(async (id) => {
+      const server = http.createServer(() => {});
+      await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+      return { id, server, url: "http://127.0.0.1:" + server.address().port };
+    }));
+    try {
+      for (let index = 0; index < servers.length; index += 1) {
+        const { id, url } = servers[index];
+        await writeSession({ id, mode: "static", version: "0.3.0", url, started_at: "2026-07-28T12:00:0" + index + ".000Z" });
+      }
+      const started = Date.now();
+      const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+      assert.ok(Date.now() - started < 700);
+      assert.equal(status.server.state, "not_responding");
+    } finally {
+      await Promise.all(servers.map(({ server }) => new Promise((resolve) => server.close(resolve))));
+    }
   });
 });
 

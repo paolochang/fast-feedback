@@ -114,7 +114,7 @@ test("writes a static session marker after binding the server port", async () =>
   await withStatic({ "mockup.html": "<body>page</body>" }, async ({ file, inbox }) => {
     const server = await startStatic(file, inbox);
     try {
-      const marker = JSON.parse(await readFile(join(inbox, "session.json"), "utf8"));
+      const marker = JSON.parse(await readFile(join(inbox, "session.json"), "utf8")).sessions[0];
       assert.deepEqual({ ...marker, id: undefined, started_at: undefined }, {
         id: undefined,
         mode: "static",
@@ -134,7 +134,7 @@ test("returns the session marker id from the static server ping", async () => {
   await withStatic({ "mockup.html": "<body>page</body>" }, async ({ file, inbox }) => {
     const server = await startStatic(file, inbox);
     try {
-      const marker = JSON.parse(await readFile(join(inbox, "session.json"), "utf8"));
+      const marker = JSON.parse(await readFile(join(inbox, "session.json"), "utf8")).sessions[0];
       const ping = await request({ port: server.port, path: "/__ffb__/ping" });
       assert.equal(ping.status, 200);
       assert.equal(JSON.parse(ping.body).id, marker.id);

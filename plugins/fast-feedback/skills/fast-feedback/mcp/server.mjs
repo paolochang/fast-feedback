@@ -3,7 +3,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
-import { count, inboxPath, peek, readAndClear, readSession } from "../scripts/inbox.mjs";
+import { count, inboxPath, peek, readAndClear, readSessions } from "../scripts/inbox.mjs";
 import { isLoopbackHost } from "../scripts/proxy-guards.mjs";
 import { currentLatest, ensureVersionChecked, versionInfo } from "../scripts/update-check.mjs";
 
@@ -57,25 +57,31 @@ function emptyStatusHint(inbox) {
 }
 
 async function sessionServerStatus() {
-  const session = await readSession();
-  if (!session) return { state: "none" };
-  let sessionUrl;
-  try {
-    sessionUrl = new URL(session.url);
-  } catch {
-    return { state: "not_responding", mode: session.mode, url: session.url, started_at: session.started_at };
-  }
-  if (!isLoopbackHost(sessionUrl.hostname)) {
-    return { state: "not_responding", mode: session.mode, url: session.url, started_at: session.started_at };
-  }
-  try {
-    const response = await fetch(new URL("/__ffb__/ping", sessionUrl), { signal: AbortSignal.timeout(300), redirect: "manual" });
-    const ping = await response.json();
-    if (response.ok && ping?.ffb === true && ping?.id === session.id) {
-      return { state: "running", mode: session.mode, url: session.url, started_at: session.started_at };
+  const sessions = await readSessions();
+  if (!sessions.length) return { state: "none" };
+  const mostRecent = (entries) => entries.reduce((latest, entry) => (
+    entry.started_at >= latest.started_at ? entry : latest
+  ));
+  const statusFor = (state, session) => ({ state, mode: session.mode, url: session.url, started_at: session.started_at });
+  const probes = await Promise.all(sessions.map(async (session) => {
+    let sessionUrl;
+    try {
+      sessionUrl = new URL(session.url);
+    } catch {
+      return null;
     }
-  } catch {}
-  return { state: "not_responding", mode: session.mode, url: session.url, started_at: session.started_at };
+    if (!isLoopbackHost(sessionUrl.hostname)) return null;
+    try {
+      const response = await fetch(new URL("/__ffb__/ping", sessionUrl), { signal: AbortSignal.timeout(300), redirect: "manual" });
+      const ping = await response.json();
+      return response.ok && ping?.ffb === true && ping?.id === session.id ? session : null;
+    } catch {
+      return null;
+    }
+  }));
+  const liveSessions = probes.filter(Boolean);
+  if (liveSessions.length) return statusFor("running", mostRecent(liveSessions));
+  return statusFor("not_responding", mostRecent(sessions));
 }
 
 function waitTimeoutMs() {

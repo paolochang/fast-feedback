@@ -128,10 +128,11 @@ installed. It provides four tools:
 - `ffb_peek` reads pending feedback without clearing it.
 - `ffb_status` returns JSON with `pending` (the number of pending items),
   `inbox` (the absolute inbox path), `server`, and `version`. `server` is an
-  object whose `state` is `none`, `running`, or `not_responding`; when a server
-  marker exists, it also includes `mode`, `url`, and `started_at`. `version` is
-  `{ current, latest, outdated }`. A `hint` is included when the server is not
-  running.
+  object whose `state` is `none`, `running`, or `not_responding`; the marker
+  tracks every server that has served the inbox, and `running` means at least
+  one answers. It includes the selected server's `mode`, `url`, and
+  `started_at`. `version` is `{ current, latest, outdated }`. A `hint` is
+  included when the server is not running.
 
 For the **watch loop** (review mode), call `ffb_wait`, apply the returned
 feedback, then call `ffb_wait` again to re-arm it. For clients that do not support
