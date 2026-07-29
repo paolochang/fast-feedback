@@ -296,7 +296,7 @@
     '<button class="__ffb_btn" id="__ffb_pcopy" style="padding:3px 9px">Copy</button>' +
     '<button class="__ffb_btn" id="__ffb_pclear" style="padding:3px 9px">Clear</button>' +
     '<button class="__ffb_x" title="Close">✕</button></div>' +
-    '<div class="__ffb_tabs"><button class="__ffb_tab sel" data-tab="live">Live<span id="__ffb_livecnt"> (0)</span></button><button class="__ffb_tab" data-tab="history">History<span id="__ffb_histcnt"></span></button></div>' +
+    '<div class="__ffb_tabs"><button class="__ffb_tab sel" data-tab="live">Live<span id="__ffb_livecnt"></span></button><button class="__ffb_tab" data-tab="history">History<span id="__ffb_histcnt"></span></button></div>' +
     '<div class="__ffb_list" id="__ffb_items"></div>' +
     '<div id="__ffb_foot" style="padding:10px 12px;border-top:1px solid var(--__ffb_line);display:flex">' +
     '<button class="__ffb_btn primary" id="__ffb_psend" title="Send new feedback to AI" style="flex:1;padding:8px 12px">Send to AI</button></div>';
@@ -489,7 +489,7 @@
   function updateCount() {
     bar.querySelector("#__ffb_cnt").textContent = anns.length;
     panel.querySelector("#__ffb_ptitlecnt").textContent = anns.length;
-    panel.querySelector("#__ffb_livecnt").textContent = " (" + anns.length + ")";
+    panel.querySelector("#__ffb_livecnt").textContent = anns.length ? " (" + anns.length + ")" : "";
   }
   function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
 
@@ -501,16 +501,23 @@
     return typeof window.__FFB_HISTORY_LIST === "function" || hasIndexedDb();
   }
 
+  // A tab shows its count only when there is something to count: an unknown count
+  // and an empty one both render as a bare label, never "(0)".
   function updateHistoryCount() {
-    panel.querySelector("#__ffb_histcnt").textContent = historyCount === null ? "" : " (" + historyCount + ")";
+    panel.querySelector("#__ffb_histcnt").textContent = historyCount ? " (" + historyCount + ")" : "";
   }
 
+  // Fills in the History count without making the user visit the tab. The History
+  // tab runs its own load, so skip this while that one is in flight, and never let
+  // a result from here overwrite a count that landed in the meantime — the tab's
+  // load is the authoritative, fresher read and these two are not ordered.
   function refreshHistoryCount() {
-    if (historyCount !== null || historyCountLoading || !historyIsAvailable()) return;
+    if (historyCount !== null || historyCountLoading || historyLoading || !historyIsAvailable()) return;
     historyCountLoading = true;
     historyStore.list().then(function (rows) {
-      historyCount = Array.isArray(rows) ? rows.length : 0;
       historyCountLoading = false;
+      if (historyCount !== null) return;
+      historyCount = Array.isArray(rows) ? rows.length : 0;
       updateHistoryCount();
     }).catch(function () {
       historyCountLoading = false;
