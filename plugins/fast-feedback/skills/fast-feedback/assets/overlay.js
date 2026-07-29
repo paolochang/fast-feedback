@@ -148,11 +148,16 @@
     '.__ffb_bar #__ffb_setbtn{padding:4px 9px;font-size:17px;line-height:1}',
     '.__ffb_modal{position:fixed;z-index:2147483647;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center}',
     '.__ffb_modal.open{display:flex}',
-    '.__ffb_setdlg{background:var(--__ffb_surf);border:1px solid var(--__ffb_line);border-radius:10px;width:380px;max-width:calc(100vw - 24px);color:var(--__ffb_ink);box-shadow:0 12px 40px rgba(0,0,0,.6);overflow:hidden}',
+    // Capped to the viewport and laid out as a column so the rows are the part
+    // that gives: the header, the hint, the version and the buttons are all
+    // pinned, and if they plus the rows would overflow, the rows shrink and
+    // scroll instead of the dialog growing past the screen edge. Without the cap
+    // a short viewport pushes the title and the Done button out of reach.
+    '.__ffb_setdlg{background:var(--__ffb_surf);border:1px solid var(--__ffb_line);border-radius:10px;width:380px;max-width:calc(100vw - 24px);max-height:calc(100vh - 24px);display:flex;flex-direction:column;color:var(--__ffb_ink);box-shadow:0 12px 40px rgba(0,0,0,.6);overflow:hidden}',
     '.__ffb_setdlg .__ffb_hd2{display:flex;align-items:center;gap:6px;padding:10px 12px;background:var(--__ffb_head);border-bottom:1px solid var(--__ffb_line)}',
     '.__ffb_setdlg .__ffb_hd2 .__ffb_ttl{font-size:12.5px;font-weight:700;color:var(--__ffb_gold);flex:1}',
     '.__ffb_setdlg .__ffb_hd2 .__ffb_x{cursor:pointer;background:none;border:none;color:var(--__ffb_mut);font-size:14px;line-height:1;padding:2px 4px}',
-    '.__ffb_srows{padding:10px 12px;display:flex;flex-direction:column;gap:7px;max-height:62vh;overflow:auto}',
+    '.__ffb_srows{padding:10px 12px;display:flex;flex-direction:column;gap:7px;max-height:62vh;overflow:auto;flex:0 1 auto;min-height:0}',
     '.__ffb_srow{display:flex;align-items:center;gap:10px}',
     '.__ffb_srow .__ffb_slabel{flex:1;font-size:13px;color:var(--__ffb_ink)}',
     '.__ffb_seg{display:flex;gap:4px}',
