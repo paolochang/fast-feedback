@@ -174,12 +174,15 @@ user:
 - writes the fix and clicks **Submit** (or **Ctrl+Enter**) → the box is committed
   with a number and the list count goes up. Closing an unsaved box asks before
   discarding, so nothing is lost by accident.
-- opens the list — **List** button or **Ctrl+[** — titled **Feedback (n)**, where
-  each note shows as read-only text. **Esc** closes it, unless something nearer
-  owns the key (an open form, a confirm, or a note you're editing). Hovering a
-  note reveals **✎ edit** and **🗑 delete** (top-right of the card) — delete
-  turns red on hover so the destructive one is obvious before you click it;
-  a committed box also has a **🗑 on its top-right corner**.
+- opens the list — **List** button or **Ctrl+[** — titled **Feedback (n)**, with
+  a **Live** and a **History** tab. Each carries its own count (**Live (3)**,
+  **History (12)**); a tab with nothing in it just reads **Live** / **History**
+  rather than showing a zero. Each note shows as read-only text. **Esc** closes
+  the list, unless something nearer owns the key (an open form, a confirm, or a
+  note you're editing). Hovering a note reveals **✎ edit** and **🗑 delete**
+  (top-right of the card) — delete turns red on hover so the destructive one is
+  obvious before you click it; a committed box also has a **🗑 on its top-right
+  corner**, grey until you hover it and then the same red.
   Editing is inline; closing a changed edit asks before reverting. Deleting
   asks first (**Cancel / Discard**).
 - the list header also has **Copy** and **Clear** — Clear wipes every note after a
