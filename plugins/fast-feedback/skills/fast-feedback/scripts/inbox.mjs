@@ -42,26 +42,30 @@ async function writeAtomically(path, contents) {
   }
 }
 
+// `now` is accepted and deliberately unused: pruning must not consult wall time,
+// because a forward clock step moves it while the monotonic uptime stays put. The
+// tests pass a hostile clock through this seam to prove it changes nothing.
 export async function writeSession(session, { now = Date.now, uptime = systemUptime } = {}) {
   if (!(typeof session?.id === "string" && session.id && !/[\\/]/.test(session.id) && !session.id.includes(".."))) {
     throw new TypeError("session id must be a safe filename");
   }
   const dir = sessionsPath();
   const filename = session.id + ".json";
+  const uptimeMs = Math.round(uptime() * 1000);
   await mkdir(dir, { recursive: true });
-  await writeAtomically(join(dir, filename), JSON.stringify(session));
+  await writeAtomically(join(dir, filename), JSON.stringify({ ...session, uptime_ms: uptimeMs }));
   let names;
   try {
     names = await readdir(dir);
   } catch {
     return;
   }
-  const preBootCutoff = now() - uptime() * 1000 - 60000;
   await Promise.all(names.filter((name) => name !== filename).map(async (name) => {
     try {
       const sessions = parseSessions(await readFile(join(dir, name), "utf8"));
-      const preBoot = sessions.length > 0 && sessions.every(({ started_at }) => Date.parse(started_at) < preBootCutoff);
-      if (preBoot || sessions.some(({ url, id }) => url === session.url && id !== session.id)) {
+      // This proves a reboot, but deliberately does not detect servers that died during this boot.
+      const beforeReboot = sessions.length > 0 && sessions.every(({ uptime_ms }) => uptime_ms !== undefined && uptimeMs + 1000 < uptime_ms);
+      if (beforeReboot || sessions.some(({ url, id }) => url === session.url && id !== session.id)) {
         await rm(join(dir, name), { force: true });
       }
     } catch {

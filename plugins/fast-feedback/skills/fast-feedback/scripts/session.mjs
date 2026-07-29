@@ -7,7 +7,11 @@ function validSession(session) {
     && typeof session.version === "string" && session.version
     && typeof session.url === "string" && session.url
     && typeof session.started_at === "string" && session.started_at)) return null;
-  return { id: session.id, mode: session.mode, version: session.version, url: session.url, started_at: session.started_at };
+  const valid = { id: session.id, mode: session.mode, version: session.version, url: session.url, started_at: session.started_at };
+  if (typeof session.uptime_ms === "number" && Number.isFinite(session.uptime_ms) && session.uptime_ms >= 0) {
+    valid.uptime_ms = session.uptime_ms;
+  }
+  return valid;
 }
 
 export function renderSessions(sessions) {

@@ -121,15 +121,18 @@ test("writes a static session marker after binding the server port", async () =>
     const server = await startStatic(file, inbox);
     try {
       const marker = await readSessionMarker(inbox);
-      assert.deepEqual({ ...marker, id: undefined, started_at: undefined }, {
+      assert.deepEqual({ ...marker, id: undefined, started_at: undefined, uptime_ms: undefined }, {
         id: undefined,
         mode: "static",
         version: "0.3.0",
         url: "http://127.0.0.1:" + server.port,
         started_at: undefined,
+        uptime_ms: undefined,
       });
       assert.match(marker.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
       assert.match(marker.started_at, /^\d{4}-\d{2}-\d{2}T/);
+      // Stamped from the monotonic clock so pruning can prove a reboot happened.
+      assert.ok(Number.isFinite(marker.uptime_ms) && marker.uptime_ms >= 0);
     } finally {
       await server.close();
     }

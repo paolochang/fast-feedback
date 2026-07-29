@@ -48,21 +48,23 @@ test("writeSession and readSessions use exactly one .ffb directory segment", { c
     delete process.env.FFB_INBOX;
     process.chdir(root);
     const first = { id: "first-session", mode: "static", version: "0.3.0", url: "http://127.0.0.1:5000", started_at: "2026-07-28T12:00:00.000Z" };
-    await writeSession(first);
-    assert.deepEqual(await readSessions(), [first]);
+    const firstMarker = { ...first, uptime_ms: 100000 };
+    await writeSession(first, { uptime: () => 100 });
+    assert.deepEqual(await readSessions(), [firstMarker]);
     assert.equal(inboxPath(), join(root, ".ffb"));
-    assert.equal(await readFile(join(root, ".ffb", "sessions", "first-session.json"), "utf8"), JSON.stringify(first));
+    assert.equal(await readFile(join(root, ".ffb", "sessions", "first-session.json"), "utf8"), JSON.stringify(firstMarker));
     assert.equal(join(root, ".ffb", "sessions", "first-session.json").match(/\.ffb/g).length, 1);
     process.chdir(cwd);
 
     const configured = join(root, "configured-inbox");
     process.env.FFB_INBOX = configured;
     const second = { ...first, id: "second-session", mode: "proxy", url: "http://127.0.0.1:5001" };
-    await writeSession(second);
-    assert.deepEqual(await readSessions(), [second]);
-    assert.equal(await readFile(join(configured, "sessions", "second-session.json"), "utf8"), JSON.stringify(second));
+    const secondMarker = { ...second, uptime_ms: 101000 };
+    await writeSession(second, { uptime: () => 101 });
+    assert.deepEqual(await readSessions(), [secondMarker]);
+    assert.equal(await readFile(join(configured, "sessions", "second-session.json"), "utf8"), JSON.stringify(secondMarker));
     await writeFile(join(configured, "session.json"), "malformed", "utf8");
-    assert.deepEqual(await readSessions(), [second]);
+    assert.deepEqual(await readSessions(), [secondMarker]);
   } finally {
     process.chdir(cwd);
     if (previous === undefined) delete process.env.FFB_INBOX;
@@ -90,26 +92,23 @@ test("writeSession replaces a prior server on its URL while retaining other mark
   });
 });
 
-test("writeSession prunes only session markers provably before boot", async () => {
+test("writeSession prunes markers only after a reboot", async () => {
   await withInbox(async (dir) => {
-    const now = Date.now();
-    const bootTime = now - 60 * 60 * 1000;
-    const marker = (id, startedAt) => ({ id, mode: "static", version: "0.3.0", url: "http://127.0.0.1:" + id, started_at: new Date(startedAt).toISOString() });
-    const preBoot = marker("pre-boot", bootTime - 60001);
-    const insideMargin = marker("inside-margin", bootTime - 1);
-    const afterBoot = marker("after-boot", bootTime + 1);
+    const marker = (id, uptime_ms) => ({ id, mode: "static", version: "0.3.0", url: "http://127.0.0.1:" + id, started_at: "2026-07-28T12:00:00.000Z", ...(uptime_ms === undefined ? {} : { uptime_ms }) });
+    const beforeReboot = marker("before-reboot", 125001);
+    const liveAfterForwardClockStep = marker("live-after-forward-clock-step", 123000);
+    const earlierThisBoot = marker("earlier-this-boot", 122999);
+    const legacy = marker("legacy");
     const sessionsDir = join(dir, "sessions");
     await mkdir(sessionsDir);
-    await Promise.all([preBoot, insideMargin, afterBoot].map((session) => writeFile(join(sessionsDir, session.id + ".json"), JSON.stringify(session), "utf8")));
+    await Promise.all([beforeReboot, liveAfterForwardClockStep, earlierThisBoot, legacy].map((session) => writeFile(join(sessionsDir, session.id + ".json"), JSON.stringify(session), "utf8")));
 
-    assert.deepEqual((await readSessions()).map(({ id }) => id), ["pre-boot", "inside-margin", "after-boot"]);
-    assert.deepEqual((await readdir(sessionsDir)).sort(), ["after-boot.json", "inside-margin.json", "pre-boot.json"]);
+    assert.deepEqual((await readdir(sessionsDir)).sort(), ["before-reboot.json", "earlier-this-boot.json", "legacy.json", "live-after-forward-clock-step.json"]);
 
-    const current = marker("current", now);
-    await writeSession(current, { now: () => now, uptime: () => (now - bootTime) / 1000 });
+    await writeSession(marker("current"), { now: () => Date.parse("2030-01-01T00:00:00.000Z"), uptime: () => 124 });
 
-    assert.deepEqual((await readSessions()).map(({ id }) => id), ["inside-margin", "after-boot", "current"]);
-    assert.deepEqual((await readdir(sessionsDir)).sort(), ["after-boot.json", "current.json", "inside-margin.json"]);
+    assert.deepEqual((await readdir(sessionsDir)).sort(), ["current.json", "earlier-this-boot.json", "legacy.json", "live-after-forward-clock-step.json"]);
+    assert.deepEqual((await readSessions()).map(({ id }) => id).sort(), ["current", "earlier-this-boot", "legacy", "live-after-forward-clock-step"]);
   });
 });
 
@@ -118,9 +117,9 @@ test("concurrent writeSession calls retain both server markers", async () => {
     const first = { id: "first-session", mode: "static", version: "0.3.0", url: "http://127.0.0.1:5000", started_at: "2026-07-28T12:00:00.000Z" };
     const second = { id: "second-session", mode: "proxy", version: "0.3.0", url: "http://127.0.0.1:5001", started_at: "2026-07-28T12:00:01.000Z" };
 
-    await Promise.all([writeSession(first), writeSession(second)]);
+    await Promise.all([writeSession(first, { uptime: () => 100 }), writeSession(second, { uptime: () => 101 })]);
 
-    assert.deepEqual(await readSessions(), [first, second]);
+    assert.deepEqual(await readSessions(), [{ ...first, uptime_ms: 100000 }, { ...second, uptime_ms: 101000 }]);
     assert.deepEqual(await readdir(join(dir, "sessions")), ["first-session.json", "second-session.json"]);
     await assert.rejects(stat(join(dir, ".lock")), { code: "ENOENT" });
   });
@@ -131,13 +130,14 @@ test("readSessions merges both legacy marker forms after per-server markers", as
     const current = { id: "current", mode: "static", version: "0.3.0", url: "http://127.0.0.1:5000", started_at: "2026-07-28T12:00:02.000Z" };
     const legacySingle = { id: "legacy-single", mode: "proxy", version: "0.3.0", url: "http://127.0.0.1:5001", started_at: "2026-07-28T12:00:00.000Z" };
     const legacyList = { id: "legacy-list", mode: "static", version: "0.3.0", url: "http://127.0.0.1:5002", started_at: "2026-07-28T12:00:01.000Z" };
-    await writeSession(current);
+    const currentMarker = { ...current, uptime_ms: 100000 };
+    await writeSession(current, { uptime: () => 100 });
 
     await writeFile(join(dir, "session.json"), JSON.stringify(legacySingle), "utf8");
-    assert.deepEqual(await readSessions(), [legacySingle, current]);
+    assert.deepEqual(await readSessions(), [legacySingle, currentMarker]);
 
     await writeFile(join(dir, "session.json"), JSON.stringify({ sessions: [legacyList, current] }), "utf8");
-    assert.deepEqual(await readSessions(), [legacyList, current]);
+    assert.deepEqual(await readSessions(), [legacyList, currentMarker]);
   });
 });
 

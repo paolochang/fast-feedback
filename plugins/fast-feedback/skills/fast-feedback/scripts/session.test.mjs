@@ -17,7 +17,11 @@ test("renderSessions and parseSessions round-trip valid sessions", () => {
 });
 
 test("parseSessions accepts legacy markers and drops invalid entries", () => {
+  const withUptime = { ...session, uptime_ms: 123456 };
+  assert.deepEqual(parseSessions(renderSessions([withUptime])), [withUptime]);
   assert.deepEqual(parseSessions(JSON.stringify(session)), [session]);
+  assert.deepEqual(parseSessions(JSON.stringify({ ...session, uptime_ms: "123456" })), [session]);
+  assert.deepEqual(parseSessions(JSON.stringify({ ...session, uptime_ms: -1 })), [session]);
   assert.deepEqual(parseSessions(JSON.stringify({ sessions: [session, { ...session, id: undefined }, { ...session, id: 1 }] })), [session]);
   assert.deepEqual(parseSessions("not JSON"), []);
   assert.deepEqual(parseSessions(JSON.stringify({ sessions: session })), []);
