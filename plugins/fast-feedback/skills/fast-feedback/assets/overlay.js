@@ -91,6 +91,7 @@
     '.__ffb_tabs{display:flex;gap:4px;padding:8px 10px 0;border-bottom:1px solid var(--__ffb_line)}',
     '.__ffb_tab{border:0;border-bottom:2px solid transparent;background:none;color:var(--__ffb_mut);padding:0 2px 7px;font:700 12px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;cursor:pointer}',
     '.__ffb_tab.sel{color:var(--__ffb_gold);border-color:var(--__ffb_gold)}',
+    '.__ffb_tabact{margin-left:auto;display:flex;gap:4px;align-self:flex-start}',
     '.__ffb_panel .__ffb_list{overflow:auto;padding:10px;display:flex;flex-direction:column;gap:8px}',
     '.__ffb_empty{color:var(--__ffb_mut);font-size:12.5px;text-align:center;padding:14px 8px}',
     // Loading indicator — visually distinct from the empty state (a spinner), so a
@@ -292,18 +293,16 @@
   var panel = document.createElement("div");
   panel.className = "__ffb_panel";
   panel.innerHTML =
-    '<div class="__ffb_hd"><span class="__ffb_grip">⠿</span><span class="__ffb_ttl">Feedback (<span id="__ffb_ptitlecnt">0</span>)</span>' +
-    '<button class="__ffb_btn" id="__ffb_pcopy" style="padding:3px 9px">Copy</button>' +
-    '<button class="__ffb_btn" id="__ffb_pclear" style="padding:3px 9px">Clear</button>' +
+    '<div class="__ffb_hd"><span class="__ffb_grip">⠿</span><span class="__ffb_ttl">Feedback</span>' +
     '<button class="__ffb_x" title="Close">✕</button></div>' +
-    '<div class="__ffb_tabs"><button class="__ffb_tab sel" data-tab="live">Live<span id="__ffb_livecnt"></span></button><button class="__ffb_tab" data-tab="history">History<span id="__ffb_histcnt"></span></button></div>' +
+    '<div class="__ffb_tabs"><button class="__ffb_tab sel" data-tab="live">Live<span id="__ffb_livecnt"></span></button><button class="__ffb_tab" data-tab="history">History<span id="__ffb_histcnt"></span></button><div id="__ffb_tabact"></div></div>' +
     '<div class="__ffb_list" id="__ffb_items"></div>' +
     '<div id="__ffb_foot" style="padding:10px 12px;border-top:1px solid var(--__ffb_line);display:flex">' +
     '<button class="__ffb_btn primary" id="__ffb_psend" title="Send new feedback to AI" style="flex:1;padding:8px 12px">Send to AI</button></div>';
   root.appendChild(panel);
   var itemsEl = panel.querySelector("#__ffb_items");
   var activeListTab = "live", historyRows = null, historyLoading = false, historyError = false, historyCount = null, historyCountLoading = false;
-  var historyVisibleCount = 10, historyObjectUrls = [], historyObserver = null, historyDetailId = null, historyLightbox = null;
+  var historyVisibleCount = 10, historyObjectUrls = [], historyObserver = null, historyDetailId = null, historyDetailData = null, historyLightbox = null;
 
   // ---- confirm dialog ---------------------------------------------------
   var confirmEl = document.createElement("div");
@@ -488,7 +487,6 @@
   }
   function updateCount() {
     bar.querySelector("#__ffb_cnt").textContent = anns.length;
-    panel.querySelector("#__ffb_ptitlecnt").textContent = anns.length;
     panel.querySelector("#__ffb_livecnt").textContent = anns.length ? " (" + anns.length + ")" : "";
   }
   function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
@@ -619,9 +617,36 @@
 
   function renderList() {
     updateCount();
-    if (activeListTab === "history") { renderHistory(); return; }
-    clearHistoryThumbs();
-    renderLiveList();
+    if (activeListTab === "history") renderHistory();
+    else { clearHistoryThumbs(); renderLiveList(); }
+    renderTabActions();
+  }
+
+  function renderTabActions() {
+    var actions = panel.querySelector("#__ffb_tabact");
+    actions.innerHTML = "";
+    var add = function (label, onClick) {
+      var button = document.createElement("button");
+      button.className = "__ffb_btn";
+      button.style.padding = "3px 9px";
+      button.textContent = label;
+      button.onclick = onClick;
+      actions.appendChild(button);
+      return button;
+    };
+    if (activeListTab === "live") {
+      var liveCopy = add("Copy", function () { copyTextAndFlash(buildExport(), liveCopy); });
+      add("Clear", clearAll);
+      return;
+    }
+    if (historyDetailData && historyDetailData.id === historyDetailId) {
+      var detailCopy = add("Copy", function () {
+        if (historyDetailData && historyDetailData.id === historyDetailId) copyTextAndFlash(buildHistoryExport(historyDetailData.meta), detailCopy);
+      });
+      var detailShot = add("Copy screenshot", function () {
+        if (historyDetailData && historyDetailData.id === historyDetailId) copyHistoryScreenshot(historyDetailData.blob, detailShot);
+      });
+    }
   }
 
   function renderLiveList() {
@@ -670,6 +695,7 @@
     if (historyObserver) { historyObserver.disconnect(); historyObserver = null; }
     historyObjectUrls.forEach(function (url) { URL.revokeObjectURL(url); });
     historyObjectUrls = [];
+    historyDetailData = null;
   }
 
   function appendHistoryBox(container, entry) {
@@ -796,6 +822,8 @@
     ]).then(function (result) {
       var meta = result[0], blob = result[1], url = URL.createObjectURL(blob);
       if (historyDetailId !== id || activeListTab !== "history" || !panel.classList.contains("open")) { URL.revokeObjectURL(url); return; }
+      historyDetailData = { id: id, meta: meta, blob: blob };
+      renderTabActions();
       historyObjectUrls.push(url);
       itemsEl.innerHTML = "";
       var detail = document.createElement("div");
@@ -871,8 +899,6 @@
   function closeList() { historyDetailId = null; clearHistoryThumbs(); panel.classList.remove("open"); }
   panel.querySelector(".__ffb_x").onclick = closeList;
   panel.querySelector("#__ffb_psend").onclick = sendToAI;
-  panel.querySelector("#__ffb_pcopy").onclick = copyAll;
-  panel.querySelector("#__ffb_pclear").onclick = clearAll;
 
   // Clear wipes every committed annotation (and its box). Guarded by a confirm
   // since it's destructive and the boxes can't be recovered. Numbering restarts
@@ -897,13 +923,55 @@
     });
     return anns.length ? s : "(no feedback yet)";
   }
-  function copyAll() {
-    var text = buildExport();
+
+  function buildHistoryExport(meta) {
+    var items = Array.isArray(meta && meta.items) ? meta.items : [];
+    var s = "# Fast feedback (" + (meta && meta.url ? meta.url : "") + ")\n";
+    items.forEach(function (item) {
+      var r = item.region || {};
+      s += "- [" + item.n + "] " + item.sel + "  [x" + r.x + "% y" + r.y + "% w" + r.w + "% h" + r.h + "%]  " + (item.comment || "(no comment)") + "\n";
+    });
+    return items.length ? s : "(no feedback yet)";
+  }
+
+  // Restores innerHTML rather than textContent because the bar's Copy All label
+  // carries markup that a text-only restore would flatten.
+  function flashButton(button, label) {
+    if (!button) return;
+    var prev = button.innerHTML; button.textContent = label;
+    setTimeout(function () { button.innerHTML = prev; }, 1200);
+  }
+
+  function copyTextAndFlash(text, button) {
     if (navigator.clipboard) navigator.clipboard.writeText(text).catch(function () { legacyCopy(text); });
     else legacyCopy(text);
-    var b = bar.querySelector("#__ffb_copybtn");
-    var prev = b.innerHTML; b.textContent = "Copied ✓";
-    setTimeout(function () { b.innerHTML = prev; }, 1200);
+    flashButton(button, "Copied ✓");
+  }
+
+  function downloadHistoryScreenshot(blob, button) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = "feedback-screenshot.png"; a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    flashButton(button, "Downloaded ✓");
+  }
+
+  // The blob is already resolved here, so it goes to the clipboard directly —
+  // shoot() passes a promise instead because its capture is still rendering.
+  function copyHistoryScreenshot(blob, button) {
+    if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+      try {
+        navigator.clipboard.write([new ClipboardItem({ "image/png": blob })])
+          .then(function () { flashButton(button, "Copied ✓"); })
+          .catch(function () { downloadHistoryScreenshot(blob, button); });
+      } catch (e) { downloadHistoryScreenshot(blob, button); }
+    } else {
+      downloadHistoryScreenshot(blob, button);
+    }
+  }
+
+  function copyAll() {
+    copyTextAndFlash(buildExport(), bar.querySelector("#__ffb_copybtn"));
   }
   function legacyCopy(text) {
     var t = document.createElement("textarea"); t.value = text;
