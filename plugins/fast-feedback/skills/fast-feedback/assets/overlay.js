@@ -1091,10 +1091,39 @@
   }
 
   // ---- export / copy ----------------------------------------------------
+  function regionFromRect(rect, basis) {
+    if (!rect || !rect.width || !rect.height) return null;
+    var pct = function (v, base) { return Math.round((v / base) * 100); };
+    return { x: pct(rect.left, basis.w), y: pct(rect.top, basis.h), w: pct(rect.width, basis.w), h: pct(rect.height, basis.h) };
+  }
+
+  function currentRegion(a, basis) {
+    if (!a.boxEl) return a.region;
+    var rect = a.boxEl.getBoundingClientRect();
+    var region = regionFromRect(rect && {
+      left: rect.left + window.pageXOffset,
+      top: rect.top + window.pageYOffset,
+      width: rect.width,
+      height: rect.height
+    }, basis);
+    return region || a.region;
+  }
+
+  function currentRegionBasis() {
+    var display = boxwrap.style.display;
+    boxwrap.style.display = "none";
+    try {
+      return { w: document.documentElement.clientWidth || 1, h: document.documentElement.scrollHeight || 1 };
+    } finally {
+      boxwrap.style.display = display;
+    }
+  }
+
   function buildExport() {
     var s = "# Fast feedback (" + FILE + ")\n";
+    var basis = currentRegionBasis();
     anns.forEach(function (a) {
-      var r = a.region;
+      var r = currentRegion(a, basis);
       s += "- [" + a.n + "] " + a.sel + "  [x" + r.x + "% y" + r.y + "% w" + r.w + "% h" + r.h + "%]  " + (a.comment || "(no comment)") + "\n";
     });
     return anns.length ? s : "(no feedback yet)";
@@ -1264,6 +1293,7 @@
     });
     var toSend = snapshot.filter(function (entry) { return !entry.ann.sentToInbox; });
     var toArchive = snapshot.filter(function (entry) { return entry.ann.archivedRevision !== entry.revision; });
+    var basis = canSend && toSend.length ? currentRegionBasis() : null;
     var request;
     var sentToInbox = false;
     var archiveStarted = false;
@@ -1272,7 +1302,7 @@
     try {
       request = canSend && toSend.length ? window.__FFB_SEND(toSend.map(function (entry) {
         var a = entry.ann;
-        return { id: entry.id, n: a.n, sel: a.sel, region: a.region, comment: a.comment, url: location.href, ts: new Date().toISOString() };
+        return { id: entry.id, n: a.n, sel: a.sel, region: regionFromRect(entry.rect, basis) || a.region, comment: a.comment, url: location.href, ts: new Date().toISOString() };
       })) : null;
     } catch (e) {
       sendInFlight = false;
