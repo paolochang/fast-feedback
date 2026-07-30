@@ -432,16 +432,25 @@
     }
     return null;
   }
-  // A flow-content box is stored as fractions of the element it was drawn over.
-  // Position is not inherited, but a fixed or sticky ancestor removes its whole
-  // subtree from scroll flow, so anchoring any descendant would bake the current
-  // scroll offset into a document coordinate during a resize.
-  function anchorFor(el, left, top, w, h) {
+  // Is this element pinned to the viewport rather than carried by the document?
+  // Position is not inherited, but a fixed or sticky ancestor takes its whole
+  // subtree out of scroll flow, so the chain has to be walked — a button inside a
+  // fixed navbar computes `static` itself. Anchoring anything in such a subtree
+  // would add the page offsets to a rect that does not move with the page, baking
+  // the current scroll position into a document coordinate.
+  // Re-checked on every reposition, not just at draw time: a media query can move
+  // an element into (or out of) `sticky`/`fixed` at a breakpoint.
+  function isViewportAnchored(el) {
     for (var node = el; node; node = node.parentElement) {
       var pos = window.getComputedStyle(node).position;
-      if (pos === "fixed" || pos === "sticky") return null;
+      if (pos === "fixed" || pos === "sticky") return true;
       if (node === document.body) break;
     }
+    return false;
+  }
+  // A flow-content box is stored as fractions of the element it was drawn over.
+  function anchorFor(el, left, top, w, h) {
+    if (isViewportAnchored(el)) return null;
     var er = el.getBoundingClientRect();
     if (er.width === 0 || er.height === 0) return null;
     var fw = w / er.width;
@@ -481,6 +490,9 @@
     // one layout read phase instead of forcing layout once for each annotation.
     all.forEach(function (a) {
       if (!a.anchor || !a.anchor.el || !a.anchor.el.isConnected) return;
+      // A breakpoint can temporarily make this chain viewport-anchored. Skip
+      // rather than drop the anchor so tracking resumes when it returns to flow.
+      if (isViewportAnchored(a.anchor.el)) return;
       var er = a.anchor.el.getBoundingClientRect();
       if (er.width === 0 || er.height === 0) return;
       positions.push({ a: a, er: er });
