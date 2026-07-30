@@ -242,10 +242,10 @@
   document.head.appendChild(style);
 
   var FILE = window.__FFB_FILE || document.title || (location.pathname + location.search) || "frontend";
-  var anns = [];            // committed: {id, n, sel, region, comment, sentToInbox, revision, archivedRevision, boxEl}
+  var anns = [];            // committed: {id, n, sel, region, comment, sentToInbox, revision, archivedRevision, boxEl, anchor}
   var counter = 0;
   var active = false, drawing = false, startPage = null, tempEl = null;
-  var draft = null;         // in-progress NEW annotation: {sel, region, boxEl}
+  var draft = null;         // in-progress NEW annotation: {sel, region, boxEl, anchor}
 
   var root = document.documentElement;
 
@@ -432,6 +432,83 @@
     }
     return null;
   }
+  // A flow-content box is stored as fractions of the element it was drawn over.
+  // Fixed and sticky elements are viewport-relative, so anchoring either would
+  // bake the current scroll offset into a document coordinate during a resize.
+  function anchorFor(el, left, top, w, h) {
+    var pos = window.getComputedStyle(el).position;
+    if (pos === "fixed" || pos === "sticky") return null;
+    var er = el.getBoundingClientRect();
+    if (er.width === 0 || er.height === 0) return null;
+    return {
+      el: el,
+      fx: (left - window.pageXOffset - er.left) / er.width,
+      fy: (top - window.pageYOffset - er.top) / er.height,
+      fw: w / er.width,
+      fh: h / er.height
+    };
+  }
+
+  // ResizeObserver owns elements, not annotations: keep a per-element count so
+  // deleting one of two boxes on a card cannot unobserve the surviving box.
+  var anchorCounts = new Map();
+  var repositionFrame = null;
+  function positionBox(a, er) {
+    if (!a.anchor || !a.anchor.el || !a.anchor.el.isConnected || !er || er.width === 0 || er.height === 0 || !a.boxEl) return;
+    var anchor = a.anchor;
+    a.boxEl.style.left = (er.left + anchor.fx * er.width + window.pageXOffset) + "px";
+    a.boxEl.style.top = (er.top + anchor.fy * er.height + window.pageYOffset) + "px";
+    a.boxEl.style.width = (anchor.fw * er.width) + "px";
+    a.boxEl.style.height = (anchor.fh * er.height) + "px";
+  }
+  function repositionAll() {
+    var positions = [];
+    var all = anns.slice();
+    if (draft) all.push(draft);
+    // Read every rect before writing a style: this turns a many-box resize into
+    // one layout read phase instead of forcing layout once for each annotation.
+    all.forEach(function (a) {
+      if (!a.anchor || !a.anchor.el || !a.anchor.el.isConnected) return;
+      var er = a.anchor.el.getBoundingClientRect();
+      if (er.width === 0 || er.height === 0) return;
+      positions.push({ a: a, er: er });
+    });
+    positions.forEach(function (p) { positionBox(p.a, p.er); });
+  }
+  function scheduleReposition() {
+    // Resize and observer bursts commonly arrive together; let one animation
+    // frame coalesce them, and never re-enter while that frame is pending.
+    if (repositionFrame !== null) return;
+    repositionFrame = window.requestAnimationFrame(function () {
+      repositionFrame = null;
+      repositionAll();
+    });
+  }
+  var anchorObserver = new ResizeObserver(function () { scheduleReposition(); });
+  // Body is the permanent reflow sentinel. Its baseline reference stays alive
+  // even if a page-level annotation is later removed.
+  anchorObserver.observe(document.body);
+  anchorCounts.set(document.body, 1);
+  function retainAnchor(a) {
+    if (!a.anchor || !a.anchor.el) return;
+    var el = a.anchor.el;
+    var count = anchorCounts.get(el) || 0;
+    if (count === 0) anchorObserver.observe(el);
+    anchorCounts.set(el, count + 1);
+  }
+  function releaseAnchor(a) {
+    if (!a.anchor || !a.anchor.el) return;
+    var el = a.anchor.el;
+    var count = anchorCounts.get(el) || 0;
+    if (count === 1) {
+      anchorObserver.unobserve(el);
+      anchorCounts.delete(el);
+    } else if (count > 1) {
+      anchorCounts.set(el, count - 1);
+    }
+    a.anchor = null;
+  }
+  window.addEventListener("resize", scheduleReposition);
   function clampToView(x, y, w, h) {
     return { x: Math.max(6, Math.min(window.innerWidth - w - 6, x)), y: Math.max(BAR_H + 6, Math.min(window.innerHeight - h - 6, y)) };
   }
@@ -481,7 +558,9 @@
     tempEl.remove(); tempEl = null;
     if (w < 8 || h < 8) return;
     var cx = (startPage.cx + e.clientX) / 2, cy = (startPage.cy + e.clientY) / 2;
-    var sel = selectorFor(elAt(cx, cy));
+    var hit = elAt(cx, cy);
+    var el = hit || document.body;
+    var sel = selectorFor(hit);
     var docW = document.documentElement.clientWidth || 1, docH = document.documentElement.scrollHeight || 1;
     var pct = function (v, base) { return Math.round((v / base) * 100); };
     var region = { x: pct(left, docW), y: pct(top, docH), w: pct(w, docW), h: pct(h, docH) };
@@ -489,7 +568,8 @@
     box.className = "__ffb_box pending";
     box.style.left = left + "px"; box.style.top = top + "px"; box.style.width = w + "px"; box.style.height = h + "px";
     boxwrap.appendChild(box);
-    draft = { sel: sel, region: region, boxEl: box };
+    draft = { sel: sel, region: region, boxEl: box, anchor: anchorFor(el, left, top, w, h) };
+    retainAnchor(draft);
     openForm(sel, "", e.clientX, e.clientY);
     setActive(false); // one-shot: disarm the highlight cursor after one box
   });
@@ -505,6 +585,7 @@
   }
   function closeFormDiscard() {
     // called when abandoning a NEW draft
+    if (draft) releaseAnchor(draft);
     if (draft && draft.boxEl) draft.boxEl.remove();
     draft = null;
     form.classList.remove("open");
@@ -512,7 +593,7 @@
   function submitForm() {
     if (!draft) { form.classList.remove("open"); return; }
     var n = ++counter;
-    var ann = { id: crypto.randomUUID(), n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), sentToInbox: false, revision: 0, archivedRevision: -1, boxEl: draft.boxEl };
+    var ann = { id: crypto.randomUUID(), n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), sentToInbox: false, revision: 0, archivedRevision: -1, boxEl: draft.boxEl, anchor: draft.anchor };
     decorateBox(ann);
     anns.push(ann);
     draft = null;
@@ -531,6 +612,7 @@
   }
   function deleteAnn(a) {
     confirmDiscard("Delete annotation [" + a.n + "]? This can't be undone.", function () {
+      releaseAnchor(a);
       if (a.boxEl) a.boxEl.remove();
       anns.splice(anns.indexOf(a), 1);
       if (editingN === a.n) editingN = null;
@@ -1000,7 +1082,7 @@
   function clearAll() {
     if (!anns.length) return;
     confirmDiscard("Clear all " + anns.length + " feedback item" + (anns.length > 1 ? "s" : "") + "? This can't be undone.", function () {
-      anns.forEach(function (a) { if (a.boxEl) a.boxEl.remove(); });
+      anns.forEach(function (a) { releaseAnchor(a); if (a.boxEl) a.boxEl.remove(); });
       anns = [];
       counter = 0;
       editingN = null;
@@ -1243,7 +1325,7 @@
       var outcome = flushOutcome({ sentToInbox: sentToInbox, archivedNew: toArchive.length, count: items.length });
       if (outcome.clear) {
         var flushed = snapshot.filter(function (entry) { return entry.ann.revision === entry.revision && anns.indexOf(entry.ann) !== -1; });
-        flushed.forEach(function (entry) { if (entry.ann.boxEl) entry.ann.boxEl.remove(); });
+        flushed.forEach(function (entry) { releaseAnchor(entry.ann); if (entry.ann.boxEl) entry.ann.boxEl.remove(); });
         anns = anns.filter(function (a) { return !flushed.some(function (entry) { return entry.ann === a; }); });
       }
       historyRows = null;
@@ -1951,6 +2033,12 @@
   // ---- re-show hook (live mode paste-twice) -----------------------------
   window.__ffb_show = function () { setEnabled(true); setActive(false); };
   window.__ffb_teardown = function () {
+    if (repositionFrame !== null) window.cancelAnimationFrame(repositionFrame);
+    window.removeEventListener("resize", scheduleReposition);
+    if (draft) releaseAnchor(draft);
+    anns.forEach(function (a) { releaseAnchor(a); });
+    anchorObserver.disconnect();
+    anchorCounts.clear();
     clearHistoryThumbs();
     [bar, toast, arm, layer, boxwrap, form, panel, confirmEl, settingsEl, style].forEach(function (n) { if (n && n.remove) n.remove(); });
     window.__ffb_loaded = false;
