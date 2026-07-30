@@ -433,11 +433,15 @@
     return null;
   }
   // A flow-content box is stored as fractions of the element it was drawn over.
-  // Fixed and sticky elements are viewport-relative, so anchoring either would
-  // bake the current scroll offset into a document coordinate during a resize.
+  // Position is not inherited, but a fixed or sticky ancestor removes its whole
+  // subtree from scroll flow, so anchoring any descendant would bake the current
+  // scroll offset into a document coordinate during a resize.
   function anchorFor(el, left, top, w, h) {
-    var pos = window.getComputedStyle(el).position;
-    if (pos === "fixed" || pos === "sticky") return null;
+    for (var node = el; node; node = node.parentElement) {
+      var pos = window.getComputedStyle(node).position;
+      if (pos === "fixed" || pos === "sticky") return null;
+      if (node === document.body) break;
+    }
     var er = el.getBoundingClientRect();
     if (er.width === 0 || er.height === 0) return null;
     var fw = w / er.width;
