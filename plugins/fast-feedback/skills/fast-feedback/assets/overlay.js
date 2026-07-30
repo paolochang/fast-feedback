@@ -415,11 +415,22 @@
     if (txt) s += ' "' + txt + '"';
     return s;
   }
+  // Which PAGE element is under this point? Every piece of our chrome is appended
+  // to documentElement (or head), never inside body — see the root.appendChild
+  // calls below — so "is it inside body" cleanly separates the app's DOM from
+  // ours. That beats matching __ffb* class names: the trash icon decorateBox
+  // injects has no class at all, and an SVG's .className is an SVGAnimatedString
+  // rather than a string, so a name-based filter hands our own nodes back. Boxes
+  // sit above the draw layer and reveal that icon on hover, so it is reachable
+  // mid-drag. Containment also needs no upkeep when new chrome is added.
+  // Returns null when the point holds nothing of the page's; selectorFor(null)
+  // folds that to "page".
   function elAt(cx, cy) {
-    layer.style.pointerEvents = "none";
-    var el = document.elementFromPoint(cx, cy);
-    layer.style.pointerEvents = "";
-    return el;
+    var els = document.elementsFromPoint(cx, cy);
+    for (var i = 0; i < els.length; i++) {
+      if (document.body.contains(els[i])) return els[i];
+    }
+    return null;
   }
   function clampToView(x, y, w, h) {
     return { x: Math.max(6, Math.min(window.innerWidth - w - 6, x)), y: Math.max(BAR_H + 6, Math.min(window.innerHeight - h - 6, y)) };
