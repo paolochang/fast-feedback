@@ -440,12 +440,20 @@
     if (pos === "fixed" || pos === "sticky") return null;
     var er = el.getBoundingClientRect();
     if (er.width === 0 || er.height === 0) return null;
+    var fw = w / er.width;
+    var fh = h / er.height;
     return {
       el: el,
       fx: (left - window.pageXOffset - er.left) / er.width,
       fy: (top - window.pageYOffset - er.top) / er.height,
-      fw: w / er.width,
-      fh: h / er.height
+      fw: fw,
+      fh: fh,
+      w: w,
+      h: h,
+      // A smaller box can be drawn across a container gap whose aspect ratio
+      // inverts at a breakpoint; keep that axis at its captured size.
+      scaleW: fw >= 0.5,
+      scaleH: fh >= 0.5
     };
   }
 
@@ -458,8 +466,8 @@
     var anchor = a.anchor;
     a.boxEl.style.left = (er.left + anchor.fx * er.width + window.pageXOffset) + "px";
     a.boxEl.style.top = (er.top + anchor.fy * er.height + window.pageYOffset) + "px";
-    a.boxEl.style.width = (anchor.fw * er.width) + "px";
-    a.boxEl.style.height = (anchor.fh * er.height) + "px";
+    a.boxEl.style.width = (anchor.scaleW ? anchor.fw * er.width : anchor.w) + "px";
+    a.boxEl.style.height = (anchor.scaleH ? anchor.fh * er.height : anchor.h) + "px";
   }
   function repositionAll() {
     var positions = [];
