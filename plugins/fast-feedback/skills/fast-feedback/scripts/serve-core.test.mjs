@@ -4,13 +4,14 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import vm from "node:vm";
 
 const core = await import("./serve-core.mjs");
 const overlayPath = new URL("../assets/overlay.js", import.meta.url);
 
-function request({ port, headers = {}, body }) {
+function request({ port, method = "POST", path = "/__ffb__/send", headers = {}, body }) {
   return new Promise((resolve, reject) => {
-    const request = http.request({ host: "127.0.0.1", port, method: "POST", path: "/__ffb__/send", headers }, (response) => {
+    const request = http.request({ host: "127.0.0.1", port, method, path, headers }, (response) => {
       const chunks = [];
       response.on("data", (chunk) => chunks.push(chunk));
       response.on("end", () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
@@ -20,9 +21,9 @@ function request({ port, headers = {}, body }) {
   });
 }
 
-async function startServer() {
+async function startServer(id = "test-session") {
   const server = http.createServer((request, response) => {
-    if (!core.handleFfbRoute(request, response, { port: server.address().port })) {
+    if (!core.handleFfbRoute(request, response, { port: server.address().port, id })) {
       response.writeHead(404);
       response.end();
     }
@@ -40,6 +41,26 @@ function authorizedHeaders(port, contentType = "application/json") {
   };
 }
 
+function bootHelpers(fetch) {
+  const boot = core.renderBoot({ fileLabel: "localhost:3000" });
+  const match = boot.match(/^\n<script>([\s\S]*?)<\/script>/);
+  assert.ok(match);
+  const sandbox = { window: {}, fetch };
+  vm.runInNewContext(match[1], sandbox);
+  return sandbox.window;
+}
+
+test("renderBoot helpers reject failed settings and screenshot writes", async () => {
+  const helpers = bootHelpers(async () => ({
+    ok: false,
+    status: 403,
+    json: async () => ({ error: "forbidden" }),
+  }));
+
+  await assert.rejects(() => helpers.__FFB_SAVE({ theme: "dark" }), /Settings failed: 403/);
+  await assert.rejects(() => helpers.__FFB_SAVE_SHOT(new Uint8Array()), /Screenshot failed: 403/);
+});
+
 test("handleFfbRoute rejects /send without the token", async () => {
   const server = await startServer();
   try {
@@ -49,6 +70,37 @@ test("handleFfbRoute rejects /send without the token", async () => {
       body: "[]",
     });
     assert.equal(response.status, 403);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("handleFfbRoute rejects settings and screenshot writes with the wrong token", async () => {
+  const server = await startServer();
+  try {
+    for (const path of ["/__ffb__/settings", "/__ffb__/screenshot"]) {
+      const response = await request({
+        port: server.address().port,
+        path,
+        headers: { "x-ffb-token": "stale-token" },
+        body: "stale",
+      });
+      assert.equal(response.status, 403);
+      assert.deepEqual(JSON.parse(response.body), { error: "forbidden" });
+    }
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("handleFfbRoute serves an unauthenticated ping with only its opaque identity", async () => {
+  const server = await startServer();
+  try {
+    const ping = await request({ port: server.address().port, method: "GET", path: "/__ffb__/ping" });
+    assert.equal(ping.status, 200);
+    assert.deepEqual(JSON.parse(ping.body), { ffb: true, mode: "static", id: "test-session" });
+    const send = await request({ port: server.address().port, body: "[]", headers: { "content-type": "application/json" } });
+    assert.equal(send.status, 403);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

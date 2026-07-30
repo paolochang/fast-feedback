@@ -80,6 +80,12 @@ async function withStatic(files, run, documentName = "mockup.html") {
   }
 }
 
+async function readSessionMarker(inbox) {
+  const names = await readdir(join(inbox, "sessions"));
+  assert.equal(names.length, 1);
+  return JSON.parse(await readFile(join(inbox, "sessions", names[0]), "utf8"));
+}
+
 async function runCli(args) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [scriptPath, ...args], { env: { ...process.env, FFB_NO_OPEN: "1" }, stdio: ["ignore", "pipe", "pipe"] });
@@ -104,6 +110,55 @@ test("serves the selected document at / with an injected, uncached UTF-8 boot", 
       assert.match(response.body, /window\.__FFB_FILE="mockup\.html"/);
       assert.match(response.body, /x-ffb-token':"[0-9a-f]+"/i);
       assert.ok(response.body.indexOf("window.__FFB_FILE") < response.body.toLowerCase().lastIndexOf("</body>"));
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("writes a static session marker after binding the server port", async () => {
+  await withStatic({ "mockup.html": "<body>page</body>" }, async ({ file, inbox }) => {
+    const server = await startStatic(file, inbox);
+    try {
+      const marker = await readSessionMarker(inbox);
+      assert.deepEqual({ ...marker, id: undefined, started_at: undefined, uptime_ms: undefined }, {
+        id: undefined,
+        mode: "static",
+        version: "0.3.0",
+        url: "http://127.0.0.1:" + server.port,
+        started_at: undefined,
+        uptime_ms: undefined,
+      });
+      assert.match(marker.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+      assert.match(marker.started_at, /^\d{4}-\d{2}-\d{2}T/);
+      // Stamped from the monotonic clock so pruning can prove a reboot happened.
+      assert.ok(Number.isFinite(marker.uptime_ms) && marker.uptime_ms >= 0);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("returns the session marker id from the static server ping", async () => {
+  await withStatic({ "mockup.html": "<body>page</body>" }, async ({ file, inbox }) => {
+    const server = await startStatic(file, inbox);
+    try {
+      const marker = await readSessionMarker(inbox);
+      const ping = await request({ port: server.port, path: "/__ffb__/ping" });
+      assert.equal(ping.status, 200);
+      assert.equal(JSON.parse(ping.body).id, marker.id);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("starts static serving when its session marker cannot be written", async () => {
+  await withStatic({ "mockup.html": "<body>page</body>" }, async ({ file, inbox }) => {
+    await writeFile(inbox, "not a directory", "utf8");
+    const server = await startStatic(file, inbox);
+    try {
+      assert.match(server.output(), /fast-feedback static server running/);
     } finally {
       await server.close();
     }

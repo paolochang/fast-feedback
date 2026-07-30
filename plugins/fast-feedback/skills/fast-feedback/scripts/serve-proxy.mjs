@@ -23,11 +23,22 @@
 
 import http from "node:http";
 import net from "node:net";
+import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { inboxPath, writeSession } from "./inbox.mjs";
 import { isLoopbackHost } from "./proxy-guards.mjs";
 import { FFB_SEND_TOKEN, STRIP, handleFfbRoute, injectBoot, renderBoot } from "./serve-core.mjs";
 import { ensureVersionChecked } from "./update-check.mjs";
 
 export { FFB_SEND_TOKEN };
+
+const PLUGIN_VERSION = (() => {
+  try {
+    return JSON.parse(readFileSync(new URL("../../../.claude-plugin/plugin.json", import.meta.url), "utf8")).version;
+  } catch {
+    return "0.0.0";
+  }
+})();
 
 const argv = process.argv.slice(2);
 function opt(name, def) { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : def; }
@@ -48,11 +59,12 @@ if (targetUrl.protocol !== "http:") {
   process.exit(1);
 }
 const PORT = parseInt(opt("--port", "5000"), 10);
+const SESSION_ID = randomUUID();
 const THOST = targetUrl.hostname;
 const TPORT = targetUrl.port || "80";
 
 const server = http.createServer(function (creq, cres) {
-  if (handleFfbRoute(creq, cres, { port: PORT })) return;
+  if (handleFfbRoute(creq, cres, { port: server.address().port, mode: "proxy", id: SESSION_ID })) return;
 
   // Forward to the dev server. Rewrite Host so vhost-based dev servers answer,
   // and force identity encoding so HTML comes back uncompressed (we inject into
@@ -114,8 +126,11 @@ server.on("upgrade", function (creq, csocket, head) {
 // wall-clock timeout, fail-silent) so no request — including a stale browser
 // tab from a prior run — can be served before the badge state is resolved.
 await ensureVersionChecked();
-server.listen(PORT, "127.0.0.1", function () {
+server.listen(PORT, "127.0.0.1", async function () {
+  const url = "http://127.0.0.1:" + server.address().port;
+  await writeSession({ id: SESSION_ID, mode: "proxy", version: PLUGIN_VERSION, url, started_at: new Date().toISOString() }).catch(() => {});
   console.log("fast-feedback proxy running:");
+  console.log("  inbox: " + inboxPath());
   console.log("  http://localhost:" + PORT + "  →  " + target);
   console.log("");
   console.log("Open http://localhost:" + PORT + " in your browser (instead of " + target + ").");

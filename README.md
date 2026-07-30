@@ -99,6 +99,7 @@ node scripts/build-live.mjs
 ```
 
 Open the app tab → F12 → Console → paste → Enter.
+Send to AI does not reach the AI in this mode; use **Copy All** to paste the feedback into the conversation.
 
 ---
 

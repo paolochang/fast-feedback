@@ -3,7 +3,9 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
-import { count, peek, readAndClear } from "../scripts/inbox.mjs";
+import { count, inboxPath, peek, readAndClear, readSessions } from "../scripts/inbox.mjs";
+import { isLoopbackHost } from "../scripts/proxy-guards.mjs";
+import { currentLatest, ensureVersionChecked, versionInfo } from "../scripts/update-check.mjs";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const DEFAULT_WAIT_TIMEOUT_MS = 100_000;
@@ -37,13 +39,50 @@ export const toolDefinitions = [
   },
   {
     name: "ffb_status",
-    description: "Return the number of pending Fast Feedback items.",
+    description: "Return the pending feedback count and inbox path being read.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
 ];
 
 function textResult(text, isError = false) {
   return { content: [{ type: "text", text }], isError };
+}
+
+const EMPTY_RESULT_POINTER = " — call ffb_status to see whether a server is running and which inbox is being read.";
+
+function emptyStatusHint(inbox) {
+  return "No ffb server is answering at the inbox this MCP reads (`" + inbox + "`). Check: "
+    + "the page may be in console/bookmarklet mode (Send cannot reach the inbox there — ask for Copy All), "
+    + "or the server may have been started from a different working directory (set FFB_INBOX to the same absolute path for both).";
+}
+
+async function sessionServerStatus() {
+  const sessions = (await readSessions()).sort((left, right) => right.started_at.localeCompare(left.started_at));
+  if (!sessions.length) return { state: "none" };
+  const statusFor = (state, session) => ({ state, mode: session.mode, url: session.url, started_at: session.started_at });
+  const probe = async (session) => {
+    let sessionUrl;
+    try {
+      sessionUrl = new URL(session.url);
+    } catch {
+      return null;
+    }
+    if (!isLoopbackHost(sessionUrl.hostname)) return null;
+    try {
+      const response = await fetch(new URL("/__ffb__/ping", sessionUrl), { signal: AbortSignal.timeout(300), redirect: "manual" });
+      const ping = await response.json();
+      return response.ok && ping?.ffb === true && ping?.id === session.id ? session : null;
+    } catch {
+      return null;
+    }
+  };
+  const first = await probe(sessions[0]);
+  if (first) return statusFor("running", first);
+  for (let start = 1; start < sessions.length; start += 8) {
+    const live = (await Promise.all(sessions.slice(start, start + 8).map(probe))).find(Boolean);
+    if (live) return statusFor("running", live);
+  }
+  return statusFor("not_responding", sessions[0]);
 }
 
 function waitTimeoutMs() {
@@ -74,16 +113,26 @@ export async function callTool(name) {
   switch (name) {
     case "ffb_pull": {
       const items = await readAndClear();
-      return textResult(items.length ? JSON.stringify(items) : "no pending feedback");
+      return textResult(items.length ? JSON.stringify(items) : "no pending feedback" + EMPTY_RESULT_POINTER);
     }
     case "ffb_wait": {
       const items = await waitForFeedback();
-      return textResult(items ? JSON.stringify(items) : "none yet");
+      return textResult(items ? JSON.stringify(items) : "none yet" + EMPTY_RESULT_POINTER);
     }
-    case "ffb_peek":
-      return textResult(JSON.stringify(await peek()));
-    case "ffb_status":
-      return textResult(String(await count()));
+    case "ffb_peek": {
+      const items = await peek();
+      return textResult(items.length ? JSON.stringify(items) : "[]\n" + EMPTY_RESULT_POINTER);
+    }
+    case "ffb_status": {
+      if (!process.env.FFB_NO_UPDATE_CHECK) ensureVersionChecked();
+      const version = versionInfo(SERVER_VERSION, currentLatest());
+      const pending = await count();
+      const inbox = inboxPath();
+      const server = await sessionServerStatus();
+      const status = { pending, inbox, server, version };
+      if (server.state !== "running") status.hint = emptyStatusHint(inbox);
+      return textResult(JSON.stringify(status));
+    }
     default:
       return textResult("Unknown tool: " + String(name), true);
   }

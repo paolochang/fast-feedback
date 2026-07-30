@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { createReadStream, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bootAssignments, applyUpdate, saveScreenshot } from "./settings.mjs";
+import { inboxPath } from "./inbox.mjs";
 import * as inbox from "./inbox.mjs";
 import * as history from "./history.mjs";
 import { isOwnProxyOrigin } from "./proxy-guards.mjs";
@@ -30,8 +31,7 @@ async function markedHistoryBatch(id) {
 }
 
 function historyPngPath(id) {
-  const inboxDir = process.env.FFB_INBOX ? resolve(process.env.FFB_INBOX) : join(process.cwd(), ".ffb");
-  return join(inboxDir, "history", id + ".png");
+  return join(inboxPath(), "history", id + ".png");
 }
 
 function parseHistoryBody(body) {
@@ -56,8 +56,8 @@ function parseHistoryBody(body) {
 const here = dirname(fileURLToPath(import.meta.url));
 const h2c = readFileSync(join(here, "..", "assets", "html2canvas.min.js"), "utf8");
 const overlayPath = join(here, "..", "assets", "overlay.js");
-const saveFn = "window.__FFB_SAVE=function(p){try{fetch('/__ffb__/settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(p)});}catch(e){}};";
-const saveShotFn = "window.__FFB_SAVE_SHOT=function(blob){return fetch('/__ffb__/screenshot',{method:'POST',headers:{'content-type':'image/png'},body:blob}).then(function(r){return r.json();}).then(function(j){return j&&j.path;});};";
+const saveFn = "window.__FFB_SAVE=function(p){return fetch('/__ffb__/settings',{method:'POST',headers:{'content-type':'application/json','x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "},body:JSON.stringify(p)}).then(function(r){if(!r.ok)throw new Error('Settings failed: '+r.status);return r;});};";
+const saveShotFn = "window.__FFB_SAVE_SHOT=function(blob){return fetch('/__ffb__/screenshot',{method:'POST',headers:{'content-type':'image/png','x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "},body:blob}).then(function(r){if(!r.ok)throw new Error('Screenshot failed: '+r.status);return r.json();}).then(function(j){return j&&j.path;});};";
 const sendFn = "window.__FFB_SEND=function(items){return fetch('/__ffb__/send',{method:'POST',headers:{'content-type':'application/json','x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "},body:JSON.stringify(items)}).then(function(r){if(!r.ok)throw new Error('Send failed: '+r.status);return r;});};";
 const archiveFn = "window.__FFB_ARCHIVE=function(body){return fetch('/__ffb__/history',{method:'POST',headers:{'content-type':'application/x-ffb-history','x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "},body:body}).then(function(r){if(!r.ok)throw new Error('Archive failed: '+r.status);return r;});};";
 const historyReadFns = "window.__FFB_HISTORY_LIST=function(){return fetch('/__ffb__/history',{headers:{'x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "}}).then(function(r){if(!r.ok)throw new Error('History request failed: '+r.status);return r.json();});};" +
@@ -81,7 +81,12 @@ export function injectBoot(html, boot) {
 // server), so stripping them here is fine.
 export const STRIP = new Set(["x-frame-options", "content-security-policy", "content-security-policy-report-only"]);
 
-export function handleFfbRoute(creq, cres, { port }) {
+export function handleFfbRoute(creq, cres, { port, mode = "static", id }) {
+  if (creq.method === "GET" && creq.url === "/__ffb__/ping") {
+    sendJson(cres, 200, { ffb: true, mode, id });
+    return true;
+  }
+
   // History reads stay on the loopback-only proxy. The ID is validated before
   // it can become part of a file path, and listBatches limits visibility to
   // completion-marker-backed batches.
@@ -241,6 +246,10 @@ export function handleFfbRoute(creq, cres, { port }) {
   // Settings write-back from the overlay — persist to the on-disk file and don't
   // forward it to the dev server. Global hotkeys / this project's theme.
   if (creq.method === "POST" && creq.url === "/__ffb__/settings") {
+    if (creq.headers["x-ffb-token"] !== FFB_SEND_TOKEN) {
+      sendJson(cres, 403, { error: "forbidden" });
+      return true;
+    }
     let body = "";
     creq.on("data", function (c) { body += c; });
     creq.on("end", function () {
@@ -254,6 +263,10 @@ export function handleFfbRoute(creq, cres, { port }) {
   // the configured folder, replying with the absolute path so the toast can show
   // where it went. Not forwarded to the dev server.
   if (creq.method === "POST" && creq.url === "/__ffb__/screenshot") {
+    if (creq.headers["x-ffb-token"] !== FFB_SEND_TOKEN) {
+      sendJson(cres, 403, { error: "forbidden" });
+      return true;
+    }
     const chunks = [];
     creq.on("data", function (c) { chunks.push(c); });
     creq.on("end", function () {

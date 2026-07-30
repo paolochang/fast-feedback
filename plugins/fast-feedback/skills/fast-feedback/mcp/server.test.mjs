@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { appendItems } from "../scripts/inbox.mjs";
+import { appendItems, writeSession } from "../scripts/inbox.mjs";
 import { handleRequest, serveStdio, toolDefinitions, waitForFeedback } from "./server.mjs";
 
 async function withInbox(run) {
@@ -27,6 +28,28 @@ function toolCall(name) {
   return handleRequest({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: {} } });
 }
 
+function runStatusProcess(source, environment = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["--input-type=module", "--eval", source], {
+      env: {
+        ...process.env,
+        FFB_INBOX: join(tmpdir(), "ffb-mcp-child-" + process.pid + "-" + Date.now() + "-" + Math.random()),
+        ...environment,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.once("error", reject);
+    child.once("close", (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+const updateCheckUrl = new URL("../scripts/update-check.mjs", import.meta.url).href;
+const serverUrl = new URL("./server.mjs", import.meta.url).href;
+
 test("initialize and tools/list expose the four schemas", async () => {
   const initialized = await handleRequest({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
   const plugin = JSON.parse(await readFile(new URL("../../../.claude-plugin/plugin.json", import.meta.url), "utf8"));
@@ -45,25 +68,489 @@ test("initialize and tools/list expose the four schemas", async () => {
   assert.deepEqual(listed.result.tools, toolDefinitions);
   assert.deepEqual(listed.result.tools.map(({ name }) => name), ["ffb_pull", "ffb_wait", "ffb_peek", "ffb_status"]);
   for (const tool of listed.result.tools) assert.equal(tool.inputSchema.type, "object");
+  assert.match(listed.result.tools.find(({ name }) => name === "ffb_status").description, /inbox/);
+});
+
+test("ffb_status includes the current version before its lazy update check completes", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+    const plugin = JSON.parse(await readFile(new URL("../../../.claude-plugin/plugin.json", import.meta.url), "utf8"));
+    assert.deepEqual(status.version, { current: plugin.version, latest: null, outdated: false });
+  });
+});
+
+test("ffb_status reports the cached latest version", { concurrency: false }, async () => {
+  const plugin = JSON.parse(await readFile(new URL("../../../.claude-plugin/plugin.json", import.meta.url), "utf8"));
+  const child = await runStatusProcess(`
+    import { ensureVersionChecked } from ${JSON.stringify(updateCheckUrl)};
+    await ensureVersionChecked({ fetchImpl: async () => '{"plugins":[{"name":"fast-feedback","version":"0.3.1"}]}' });
+    const { callTool } = await import(${JSON.stringify(serverUrl)});
+    process.stdout.write(JSON.stringify(await callTool("ffb_status")));
+  `);
+  assert.equal(child.code, 0, child.stderr);
+  assert.deepEqual(JSON.parse(JSON.parse(child.stdout).content[0].text).version, {
+    current: plugin.version,
+    latest: "0.3.1",
+    outdated: true,
+  });
+});
+
+test("ffb_status returns a valid version payload after a rejected update check", { concurrency: false }, async () => {
+  const plugin = JSON.parse(await readFile(new URL("../../../.claude-plugin/plugin.json", import.meta.url), "utf8"));
+  const child = await runStatusProcess(`
+    import { ensureVersionChecked } from ${JSON.stringify(updateCheckUrl)};
+    await ensureVersionChecked({ fetchImpl: async () => { throw new Error("offline"); } });
+    const { callTool } = await import(${JSON.stringify(serverUrl)});
+    process.stdout.write(JSON.stringify(await callTool("ffb_status")));
+  `);
+  assert.equal(child.code, 0, child.stderr);
+  const reply = JSON.parse(child.stdout);
+  assert.equal(reply.isError, false);
+  assert.deepEqual(JSON.parse(reply.content[0].text).version, {
+    current: plugin.version,
+    latest: null,
+    outdated: false,
+  });
+});
+
+test("ffb_status does not wait for an in-flight update check", { concurrency: false }, async () => {
+  const plugin = JSON.parse(await readFile(new URL("../../../.claude-plugin/plugin.json", import.meta.url), "utf8"));
+  const child = await runStatusProcess(`
+    import { ensureVersionChecked } from ${JSON.stringify(updateCheckUrl)};
+    ensureVersionChecked({ fetchImpl: () => new Promise(() => {}) });
+    const { callTool } = await import(${JSON.stringify(serverUrl)});
+    process.stdout.write(JSON.stringify(await callTool("ffb_status")));
+  `);
+  assert.equal(child.code, 0, child.stderr);
+  const reply = JSON.parse(child.stdout);
+  assert.equal(reply.isError, false);
+  assert.deepEqual(JSON.parse(reply.content[0].text).version, {
+    current: plugin.version,
+    latest: null,
+    outdated: false,
+  });
+});
+
+test("ffb_status skips the update check when FFB_NO_UPDATE_CHECK is set", { concurrency: false }, async () => {
+  const child = await runStatusProcess(`
+    import { ensureVersionChecked } from ${JSON.stringify(updateCheckUrl)};
+    const { callTool } = await import(${JSON.stringify(serverUrl)});
+    const reply = await callTool("ffb_status");
+    let fetches = 0;
+    await ensureVersionChecked({ fetchImpl: async () => { fetches += 1; return '{"plugins":[]}'; } });
+    process.stdout.write(JSON.stringify({ reply, fetches }));
+  `, { FFB_NO_UPDATE_CHECK: "1" });
+  assert.equal(child.code, 0, child.stderr);
+  const { reply, fetches } = JSON.parse(child.stdout);
+  assert.equal(reply.isError, false);
+  assert.ok(JSON.parse(reply.content[0].text).version);
+  assert.equal(fetches, 1);
+});
+
+// Guards the "fire, don't await" contract. ensureVersionChecked memoises, so the
+// server's own call returns this same never-settling promise. If ffb_status ever
+// grows an `await` in front of it, the child's top-level await never settles and
+// node exits 13 (ERR_UNSETTLED_TOP_LEVEL_AWAIT) having written nothing — so a
+// regression fails loudly here instead of silently adding up to 3s to every call.
+test("ffb_status returns without waiting for the update check to settle", { concurrency: false, timeout: 20000 }, async () => {
+  const child = await runStatusProcess(`
+    import { ensureVersionChecked } from ${JSON.stringify(updateCheckUrl)};
+    ensureVersionChecked({ fetchImpl: () => new Promise(() => {}) });
+    const { callTool } = await import(${JSON.stringify(serverUrl)});
+    process.stdout.write(JSON.stringify(await callTool("ffb_status")));
+  `);
+  assert.equal(child.code, 0, "ffb_status did not return while the update check was pending: " + child.stderr);
+  const status = JSON.parse(JSON.parse(child.stdout).content[0].text);
+  assert.equal(status.version.latest, null);
+  assert.equal(status.version.outdated, false);
 });
 
 test("pull clears feedback while peek and status preserve it", { concurrency: false }, async () => {
-  await withInbox(async () => {
+  await withInbox(async (inbox) => {
     const items = [{ n: 1, comment: "first" }, { n: 2, comment: "second" }];
     await appendItems(items);
 
-    assert.equal((await toolCall("ffb_status")).result.content[0].text, "2");
+    const firstStatus = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+    assert.equal(firstStatus.pending, 2);
+    assert.equal(firstStatus.inbox, inbox);
+    assert.deepEqual(firstStatus.server, { state: "none" });
+    assert.ok(firstStatus.hint);
+    assert.doesNotMatch(firstStatus.hint, /No pending feedback/);
     assert.deepEqual(
       JSON.parse((await toolCall("ffb_peek")).result.content[0].text).map(({ id, ...item }) => item).sort((left, right) => left.n - right.n),
       items,
     );
-    assert.equal((await toolCall("ffb_status")).result.content[0].text, "2");
+    const secondStatus = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+    assert.equal(secondStatus.pending, 2);
+    assert.equal(secondStatus.inbox, inbox);
+    assert.deepEqual(secondStatus.server, { state: "none" });
+    assert.ok(secondStatus.hint);
+    assert.doesNotMatch(secondStatus.hint, /No pending feedback/);
     assert.deepEqual(
       JSON.parse((await toolCall("ffb_pull")).result.content[0].text).map(({ id, ...item }) => item).sort((left, right) => left.n - right.n),
       items,
     );
-    assert.equal((await toolCall("ffb_status")).result.content[0].text, "0");
-    assert.equal((await toolCall("ffb_pull")).result.content[0].text, "no pending feedback");
+    const emptyStatus = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+    assert.deepEqual(Object.keys(emptyStatus), ["pending", "inbox", "server", "version", "hint"]);
+    assert.equal(emptyStatus.pending, 0);
+    assert.equal(emptyStatus.inbox, inbox);
+    assert.match(emptyStatus.hint, /No ffb server is answering at the inbox this MCP reads/);
+    assert.match(emptyStatus.hint, new RegExp(inbox.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+
+    const emptyPull = (await toolCall("ffb_pull")).result.content[0].text;
+    assert.match(emptyPull, /^no pending feedback — call ffb_status to see whether a server is running and which inbox is being read\.$/);
+
+    const emptyPeek = (await toolCall("ffb_peek")).result.content[0].text;
+    const [emptyPeekJson, emptyPeekPointer] = emptyPeek.split("\n");
+    assert.deepEqual(JSON.parse(emptyPeekJson), []);
+    assert.equal(emptyPeekPointer, " — call ffb_status to see whether a server is running and which inbox is being read.");
+  });
+});
+
+test("ffb_status does not probe non-loopback session markers", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    const previousNoUpdateCheck = process.env.FFB_NO_UPDATE_CHECK;
+    const previousFetch = globalThis.fetch;
+    let fetches = 0;
+    process.env.FFB_NO_UPDATE_CHECK = "1";
+    globalThis.fetch = async () => {
+      fetches++;
+      return { ok: true, json: async () => ({ ffb: true }) };
+    };
+    try {
+      const started_at = "2026-07-28T12:00:00.000Z";
+      const url = "http://example.invalid:4321";
+      await writeSession({ id: "non-loopback", mode: "static", version: "0.3.0", url, started_at });
+
+      const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+      assert.deepEqual(status.server, { state: "not_responding", mode: "static", url, started_at });
+      assert.equal(fetches, 0);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousNoUpdateCheck === undefined) delete process.env.FFB_NO_UPDATE_CHECK;
+      else process.env.FFB_NO_UPDATE_CHECK = previousNoUpdateCheck;
+    }
+  });
+});
+
+test("ffb_status degrades malformed session marker URLs without probing", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    const previousNoUpdateCheck = process.env.FFB_NO_UPDATE_CHECK;
+    const previousFetch = globalThis.fetch;
+    let fetches = 0;
+    process.env.FFB_NO_UPDATE_CHECK = "1";
+    globalThis.fetch = async () => {
+      fetches++;
+      return { ok: true, json: async () => ({ ffb: true }) };
+    };
+    try {
+      const started_at = "2026-07-28T12:00:00.000Z";
+      const url = "not-a-valid-url";
+      await writeSession({ id: "malformed-url", mode: "static", version: "0.3.0", url, started_at });
+
+      const result = await toolCall("ffb_status");
+      assert.equal(result.result.isError, false);
+      const status = JSON.parse(result.result.content[0].text);
+      assert.deepEqual(status.server, { state: "not_responding", mode: "static", url, started_at });
+      assert.equal(fetches, 0);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousNoUpdateCheck === undefined) delete process.env.FFB_NO_UPDATE_CHECK;
+      else process.env.FFB_NO_UPDATE_CHECK = previousNoUpdateCheck;
+    }
+  });
+});
+
+test("ffb_status probes loopback session markers", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    const previousNoUpdateCheck = process.env.FFB_NO_UPDATE_CHECK;
+    const previousFetch = globalThis.fetch;
+    const requested = [];
+    process.env.FFB_NO_UPDATE_CHECK = "1";
+    globalThis.fetch = async (url, options) => {
+      requested.push(String(url));
+      assert.equal(options.redirect, "manual");
+      return { ok: true, json: async () => ({ ffb: true, id: "loopback-session" }) };
+    };
+    try {
+      for (const url of ["http://127.0.0.1:4321", "http://localhost:4321", "http://[::1]:4321"]) {
+        await writeSession({ id: "loopback-session", mode: "static", version: "0.3.0", url, started_at: "2026-07-28T12:00:00.000Z" });
+        const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+        assert.equal(status.server.state, "running");
+      }
+      assert.deepEqual(requested, [
+        "http://127.0.0.1:4321/__ffb__/ping",
+        "http://localhost:4321/__ffb__/ping",
+        "http://[::1]:4321/__ffb__/ping",
+      ]);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousNoUpdateCheck === undefined) delete process.env.FFB_NO_UPDATE_CHECK;
+      else process.env.FFB_NO_UPDATE_CHECK = previousNoUpdateCheck;
+    }
+  });
+});
+
+test("ffb_status reports marker liveness and only hints when not running", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    const none = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+    assert.deepEqual(none.server, { state: "none" });
+    assert.ok(none.hint);
+
+    const server = http.createServer((request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ffb: true, mode: "static", id: "matching-session" }));
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const url = "http://127.0.0.1:" + server.address().port;
+    try {
+      await writeSession({ id: "matching-session", mode: "static", version: "0.3.0", url, started_at: "2026-07-28T12:00:00.000Z" });
+      const running = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+      assert.deepEqual(running.server, { state: "running", mode: "static", url, started_at: "2026-07-28T12:00:00.000Z" });
+      assert.equal(running.hint, undefined);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+
+    const foreign = http.createServer((request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ffb: false }));
+    });
+    await new Promise((resolve) => foreign.listen(0, "127.0.0.1", resolve));
+    const foreignUrl = "http://127.0.0.1:" + foreign.address().port;
+    try {
+      await writeSession({ id: "foreign-session", mode: "static", version: "0.3.0", url: foreignUrl, started_at: "2026-07-28T12:00:01.000Z" });
+      const foreignStatus = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+      assert.deepEqual(foreignStatus.server, { state: "not_responding", mode: "static", url: foreignUrl, started_at: "2026-07-28T12:00:01.000Z" });
+      assert.ok(foreignStatus.hint);
+    } finally {
+      await new Promise((resolve) => foreign.close(resolve));
+    }
+
+    const started = Date.now();
+    const stopped = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+    assert.ok(Date.now() - started < 1000);
+    assert.deepEqual(stopped.server, { state: "not_responding", mode: "static", url: foreignUrl, started_at: "2026-07-28T12:00:01.000Z" });
+    assert.ok(stopped.hint);
+  });
+});
+
+test("ffb_status finds the surviving server after a later same-inbox server stops", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    const startServer = async (id) => {
+      const server = http.createServer((request, response) => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ ffb: true, id }));
+      });
+      await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+      return { server, url: "http://127.0.0.1:" + server.address().port };
+    };
+    const first = await startServer("first-server");
+    const second = await startServer("second-server");
+    try {
+      await writeSession({ id: "first-server", mode: "static", version: "0.3.0", url: first.url, started_at: "2026-07-28T12:00:00.000Z" });
+      await writeSession({ id: "second-server", mode: "static", version: "0.3.0", url: second.url, started_at: "2026-07-28T12:00:01.000Z" });
+      await new Promise((resolve) => second.server.close(resolve));
+
+      const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+      assert.deepEqual(status.server, { state: "running", mode: "static", url: first.url, started_at: "2026-07-28T12:00:00.000Z" });
+      assert.equal(status.hint, undefined);
+    } finally {
+      if (second.server.listening) await new Promise((resolve) => second.server.close(resolve));
+      await new Promise((resolve) => first.server.close(resolve));
+    }
+  });
+});
+
+test("ffb_status finds an oldest server after nine newer markers stop", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    const live = http.createServer((request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ffb: true, id: "oldest-live-server" }));
+    });
+    await new Promise((resolve) => live.listen(0, "127.0.0.1", resolve));
+    const liveUrl = "http://127.0.0.1:" + live.address().port;
+    try {
+      await writeSession({ id: "oldest-live-server", mode: "static", version: "0.3.0", url: liveUrl, started_at: "2026-07-28T12:00:00.000Z" });
+      for (let index = 1; index <= 9; index += 1) {
+        const dead = http.createServer();
+        await new Promise((resolve) => dead.listen(0, "127.0.0.1", resolve));
+        const deadUrl = "http://127.0.0.1:" + dead.address().port;
+        await new Promise((resolve) => dead.close(resolve));
+        await writeSession({ id: "dead-server-" + index, mode: "static", version: "0.3.0", url: deadUrl, started_at: "2026-07-28T12:00:" + String(index).padStart(2, "0") + ".000Z" });
+      }
+
+      const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+      assert.deepEqual(status.server, { state: "running", mode: "static", url: liveUrl, started_at: "2026-07-28T12:00:00.000Z" });
+      assert.equal(status.hint, undefined);
+    } finally {
+      await new Promise((resolve) => live.close(resolve));
+    }
+  });
+});
+
+test("ffb_status limits dead-marker probes to eight concurrent requests", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    const previousNoUpdateCheck = process.env.FFB_NO_UPDATE_CHECK;
+    const previousFetch = globalThis.fetch;
+    let probes = 0;
+    let inFlight = 0;
+    let maxInFlight = 0;
+    process.env.FFB_NO_UPDATE_CHECK = "1";
+    globalThis.fetch = async () => {
+      probes += 1;
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      inFlight -= 1;
+      return { ok: false, json: async () => ({}) };
+    };
+    try {
+      for (let index = 0; index < 17; index += 1) {
+        await writeSession({
+          id: "dead-batch-" + index,
+          mode: "static",
+          version: "0.3.0",
+          url: "http://127.0.0.1:" + (5000 + index),
+          started_at: "2026-07-28T12:00:" + String(index).padStart(2, "0") + ".000Z",
+        });
+      }
+
+      const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+      assert.equal(status.server.state, "not_responding");
+      assert.equal(probes, 17);
+      assert.ok(maxInFlight <= 8);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousNoUpdateCheck === undefined) delete process.env.FFB_NO_UPDATE_CHECK;
+      else process.env.FFB_NO_UPDATE_CHECK = previousNoUpdateCheck;
+    }
+  });
+});
+
+test("ffb_status stops after probing the most recent live marker", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    const previousNoUpdateCheck = process.env.FFB_NO_UPDATE_CHECK;
+    const previousFetch = globalThis.fetch;
+    let probes = 0;
+    process.env.FFB_NO_UPDATE_CHECK = "1";
+    globalThis.fetch = async () => {
+      probes += 1;
+      return { ok: true, json: async () => ({ ffb: true, id: "newest-live" }) };
+    };
+    try {
+      for (let index = 0; index < 9; index += 1) {
+        await writeSession({
+          id: "older-dead-" + index,
+          mode: "static",
+          version: "0.3.0",
+          url: "http://127.0.0.1:" + (5100 + index),
+          started_at: "2026-07-28T12:00:" + String(index).padStart(2, "0") + ".000Z",
+        });
+      }
+      const newest = { id: "newest-live", mode: "static", version: "0.3.0", url: "http://127.0.0.1:5110", started_at: "2026-07-28T12:01:00.000Z" };
+      await writeSession(newest);
+
+      const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+      assert.deepEqual(status.server, { state: "running", mode: newest.mode, url: newest.url, started_at: newest.started_at });
+      assert.equal(status.hint, undefined);
+      assert.equal(probes, 1);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousNoUpdateCheck === undefined) delete process.env.FFB_NO_UPDATE_CHECK;
+      else process.env.FFB_NO_UPDATE_CHECK = previousNoUpdateCheck;
+    }
+  });
+});
+
+test("ffb_status accepts a legacy single-server marker", { concurrency: false }, async () => {
+  await withInbox(async (inbox) => {
+    const server = http.createServer((request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ffb: true, id: "legacy-server" }));
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const url = "http://127.0.0.1:" + server.address().port;
+    try {
+      await writeFile(join(inbox, "session.json"), JSON.stringify({ id: "legacy-server", mode: "static", version: "0.3.0", url, started_at: "2026-07-28T12:00:00.000Z" }));
+      const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+      assert.deepEqual(status.server, { state: "running", mode: "static", url, started_at: "2026-07-28T12:00:00.000Z" });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+});
+
+test("ffb_status probes dead session markers concurrently", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    const servers = await Promise.all(["dead-one", "dead-two", "dead-three"].map(async (id) => {
+      const server = http.createServer(() => {});
+      await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+      return { id, server, url: "http://127.0.0.1:" + server.address().port };
+    }));
+    try {
+      for (let index = 0; index < servers.length; index += 1) {
+        const { id, url } = servers[index];
+        await writeSession({ id, mode: "static", version: "0.3.0", url, started_at: "2026-07-28T12:00:0" + index + ".000Z" });
+      }
+      const started = Date.now();
+      const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+      assert.ok(Date.now() - started < 700);
+      assert.equal(status.server.state, "not_responding");
+    } finally {
+      await Promise.all(servers.map(({ server }) => new Promise((resolve) => server.close(resolve))));
+    }
+  });
+});
+
+test("ffb_status rejects a different ffb server identity and includes the inbox hint", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    const server = http.createServer((request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ffb: true, mode: "static", id: "server-y" }));
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const url = "http://127.0.0.1:" + server.address().port;
+    try {
+      await writeSession({ id: "server-x", mode: "static", version: "0.3.0", url, started_at: "2026-07-28T12:00:00.000Z" });
+      const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+      assert.deepEqual(status.server, { state: "not_responding", mode: "static", url, started_at: "2026-07-28T12:00:00.000Z" });
+      assert.ok(status.hint);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+});
+
+test("ffb_status does not follow a loopback ping redirect", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    const previousNoUpdateCheck = process.env.FFB_NO_UPDATE_CHECK;
+    process.env.FFB_NO_UPDATE_CHECK = "1";
+    let remoteRequests = 0;
+    const remote = http.createServer((request, response) => {
+      remoteRequests++;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ffb: true, id: "redirect-session" }));
+    });
+    await new Promise((resolve) => remote.listen(0, "127.0.0.1", resolve));
+    const remoteUrl = "http://127.0.0.1:" + remote.address().port + "/remote";
+    const redirector = http.createServer((request, response) => {
+      response.writeHead(302, { location: remoteUrl });
+      response.end();
+    });
+    await new Promise((resolve) => redirector.listen(0, "127.0.0.1", resolve));
+    const url = "http://127.0.0.1:" + redirector.address().port;
+    try {
+      await writeSession({ id: "redirect-session", mode: "static", version: "0.3.0", url, started_at: "2026-07-28T12:00:00.000Z" });
+      const status = JSON.parse((await toolCall("ffb_status")).result.content[0].text);
+      assert.deepEqual(status.server, { state: "not_responding", mode: "static", url, started_at: "2026-07-28T12:00:00.000Z" });
+      assert.equal(remoteRequests, 0);
+    } finally {
+      await new Promise((resolve) => redirector.close(resolve));
+      await new Promise((resolve) => remote.close(resolve));
+      if (previousNoUpdateCheck === undefined) delete process.env.FFB_NO_UPDATE_CHECK;
+      else process.env.FFB_NO_UPDATE_CHECK = previousNoUpdateCheck;
+    }
   });
 });
 
@@ -72,7 +559,10 @@ test("wait returns new feedback promptly and reports a short timeout", { concurr
     const previousTimeout = process.env.FFB_WAIT_TIMEOUT_MS;
     process.env.FFB_WAIT_TIMEOUT_MS = "25";
     try {
-      assert.equal((await toolCall("ffb_wait")).result.content[0].text, "none yet");
+      assert.match(
+        (await toolCall("ffb_wait")).result.content[0].text,
+        /^none yet — call ffb_status to see whether a server is running and which inbox is being read\.$/,
+      );
     } finally {
       if (previousTimeout === undefined) delete process.env.FFB_WAIT_TIMEOUT_MS;
       else process.env.FFB_WAIT_TIMEOUT_MS = previousTimeout;

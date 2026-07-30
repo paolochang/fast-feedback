@@ -1,13 +1,23 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { uptime as systemUptime } from "node:os";
 import { join, resolve } from "node:path";
+import { parseSessions } from "./session.mjs";
 
-function inboxDir() {
+export function inboxPath() {
   return process.env.FFB_INBOX ? resolve(process.env.FFB_INBOX) : join(process.cwd(), ".ffb");
 }
 
+function sessionsPath() {
+  return join(inboxPath(), "sessions");
+}
+
+function legacySessionPath() {
+  return join(inboxPath(), "session.json");
+}
+
 async function ensureInbox() {
-  const dir = inboxDir();
+  const dir = inboxPath();
   const pendingDir = join(dir, "pending");
   await mkdir(pendingDir, { recursive: true });
   return { dir, pendingDir };
@@ -30,6 +40,71 @@ async function writeAtomically(path, contents) {
     await rm(temporaryPath, { force: true });
     throw error;
   }
+}
+
+// `now` is accepted and deliberately unused: pruning must not consult wall time,
+// because a forward clock step moves it while the monotonic uptime stays put. The
+// tests pass a hostile clock through this seam to prove it changes nothing.
+export async function writeSession(session, { now = Date.now, uptime = systemUptime } = {}) {
+  if (!(typeof session?.id === "string" && session.id && !/[\\/]/.test(session.id) && !session.id.includes(".."))) {
+    throw new TypeError("session id must be a safe filename");
+  }
+  const dir = sessionsPath();
+  const filename = session.id + ".json";
+  const uptimeMs = Math.round(uptime() * 1000);
+  await mkdir(dir, { recursive: true });
+  await writeAtomically(join(dir, filename), JSON.stringify({ ...session, uptime_ms: uptimeMs }));
+  let names;
+  try {
+    names = await readdir(dir);
+  } catch {
+    return;
+  }
+  await Promise.all(names.filter((name) => name !== filename).map(async (name) => {
+    try {
+      const contents = await readFile(join(dir, name), "utf8");
+      const freshUptimeMs = Math.round(uptime() * 1000);
+      const sessions = parseSessions(contents);
+      // This proves a reboot, but deliberately does not detect servers that died during this boot.
+      const beforeReboot = sessions.length > 0 && sessions.every(({ uptime_ms }) => uptime_ms !== undefined && freshUptimeMs + 1000 < uptime_ms);
+      if (beforeReboot || sessions.some(({ url, id }) => url === session.url && id !== session.id)) {
+        await rm(join(dir, name), { force: true });
+      }
+    } catch {
+      // Marker cleanup is best-effort; concurrent removals are harmless.
+    }
+  }));
+}
+
+export async function readSessions() {
+  let names;
+  try {
+    names = await readdir(sessionsPath());
+  } catch {
+    names = [];
+  }
+  const seen = new Set();
+  const sessions = [];
+  const add = (entries) => {
+    for (const session of entries) {
+      if (seen.has(session.id)) continue;
+      seen.add(session.id);
+      sessions.push(session);
+    }
+  };
+  await Promise.all(names.filter((name) => name.endsWith(".json")).map(async (name) => {
+    try {
+      add(parseSessions(await readFile(join(sessionsPath(), name), "utf8")));
+    } catch {
+      // Invalid and disappearing markers are ignored.
+    }
+  }));
+  try {
+    add(parseSessions(await readFile(legacySessionPath(), "utf8")));
+  } catch {
+    // The legacy marker is optional.
+  }
+  return sessions.sort((left, right) => left.started_at.localeCompare(right.started_at));
 }
 
 async function recoverAbandonedClaims(pendingDir) {
@@ -112,7 +187,9 @@ function buildMarkdown(items) {
 // atomic single-winner rename with ENOENT -> skip), NOT by this lock. So a
 // pathological stall that lets two operations overlap here can at worst leave a
 // transiently stale mirror, which the next operation's writeMirrors() self-heals;
-// it can never cause duplicate delivery or spool corruption.
+// it can never cause duplicate delivery or spool corruption. Session markers do
+// NOT use this lock — each server owns its own file, so there is nothing to
+// serialize there.
 export async function withLock(dir, run) {
   const lockDir = join(dir, ".lock");
   const ownerFile = join(lockDir, "owner");

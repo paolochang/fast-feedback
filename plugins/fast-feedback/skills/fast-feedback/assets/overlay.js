@@ -242,7 +242,7 @@
   document.head.appendChild(style);
 
   var FILE = window.__FFB_FILE || document.title || (location.pathname + location.search) || "frontend";
-  var anns = [];            // committed: {id, n, sel, region, comment, sent, revision, boxEl}
+  var anns = [];            // committed: {id, n, sel, region, comment, sentToInbox, revision, archivedRevision, boxEl}
   var counter = 0;
   var active = false, drawing = false, startPage = null, tempEl = null;
   var draft = null;         // in-progress NEW annotation: {sel, region, boxEl}
@@ -293,6 +293,41 @@
     toastTimer = setTimeout(function () { toast.className = "__ffb_toast"; }, 2600);
   }
 
+  function flushOutcome(flush) {
+    var sentToInbox = flush.sentToInbox;
+    var archivedNew = flush.archivedNew;
+    var count = flush.count;
+
+    if (count === 0) {
+      return { clear: false, toast: "Nothing new to send", isError: false };
+    }
+
+    if (sentToInbox === true) {
+      return { clear: true, toast: "Sent " + count + " items ✓", isError: false };
+    }
+
+    if (archivedNew === 0) {
+      return { clear: false, toast: "Already archived — the AI did not receive this. Use Copy All.", isError: true };
+    }
+
+    return {
+      clear: false,
+      toast: "Archived " + count + " locally — the AI did not receive this. Use Copy All.",
+      isError: true,
+    };
+  }
+
+  function sendLabel(canSend) {
+    if (canSend === true) {
+      return { label: "Send to AI", title: "Send new feedback to AI" };
+    }
+
+    return {
+      label: "Archive locally",
+      title: "No server in this mode — archives to History. Use Copy All to reach the AI.",
+    };
+  }
+
   var layer = document.createElement("div");
   layer.className = "__ffb_layer";
   root.appendChild(layer);
@@ -314,6 +349,7 @@
   var fTa = form.querySelector("#__ffb_fta");
 
   // ---- list panel -------------------------------------------------------
+  var sendButton = sendLabel(typeof window.__FFB_SEND === "function");
   var panel = document.createElement("div");
   panel.className = "__ffb_panel";
   panel.innerHTML =
@@ -322,7 +358,7 @@
     '<div class="__ffb_tabs"><div class="__ffb_tabgroup"><button class="__ffb_tab sel" data-tab="live">Live<span id="__ffb_livecnt"></span></button><button class="__ffb_tab" data-tab="history">History<span id="__ffb_histcnt"></span></button></div><div class="__ffb_tabact" id="__ffb_tabact"></div></div>' +
     '<div class="__ffb_list" id="__ffb_items"></div>' +
     '<div id="__ffb_foot" style="padding:10px 12px;border-top:1px solid var(--__ffb_line);display:flex">' +
-    '<button class="__ffb_btn primary" id="__ffb_psend" title="Send new feedback to AI" style="flex:1;padding:8px 12px">Send to AI</button></div>';
+    '<button class="__ffb_btn primary" id="__ffb_psend" title="' + sendButton.title + '" style="flex:1;padding:8px 12px">' + sendButton.label + '</button></div>';
   root.appendChild(panel);
   var itemsEl = panel.querySelector("#__ffb_items");
   var activeListTab = "live", historyRows = null, historyLoading = false, historyError = false, historyCount = null, historyCountLoading = false;
@@ -465,7 +501,7 @@
   function submitForm() {
     if (!draft) { form.classList.remove("open"); return; }
     var n = ++counter;
-    var ann = { id: crypto.randomUUID(), n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), sent: false, revision: 0, boxEl: draft.boxEl };
+    var ann = { id: crypto.randomUUID(), n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), sentToInbox: false, revision: 0, archivedRevision: -1, boxEl: draft.boxEl };
     decorateBox(ann);
     anns.push(ann);
     draft = null;
@@ -1134,6 +1170,7 @@
       return { id: entry.id, n: a.n, sel: a.sel, region: a.region, comment: a.comment, url: location.href, ts: new Date().toISOString() };
     });
     var toSend = snapshot.filter(function (entry) { return !entry.ann.sentToInbox; });
+    var toArchive = snapshot.filter(function (entry) { return entry.ann.archivedRevision !== entry.revision; });
     var request;
     var sentToInbox = false;
     var archiveStarted = false;
@@ -1154,10 +1191,10 @@
     // snapshot: an SPA nav/resize/reflow during the in-flight send can't smear a
     // newer screenshot (or route) over regions frozen at flush start. The send
     // stays independent of capture — inbox delivery must not hinge on html2canvas.
-    var capturePromise = capturePng(true);
-    capturePromise.catch(function () {});   // send-fail paths discard it; avoid an unhandled rejection
+    var capturePromise = toArchive.length ? capturePng(true) : null;
+    if (capturePromise) capturePromise.catch(function () {});   // send-fail paths discard it; avoid an unhandled rejection
     Promise.resolve(request).then(function () {
-      if (canSend && toSend.length) {
+      if (canSend) {
         sentToInbox = true;
         // Only mark the revision we actually sent as delivered. If the user edited
         // this annotation while the send was in flight (edit resets sentToInbox to
@@ -1165,6 +1202,7 @@
         // re-delivered to the inbox on the next flush.
         toSend.forEach(function (entry) { if (entry.ann.revision === entry.revision) entry.ann.sentToInbox = true; });
       }
+      if (!toArchive.length) return null;
       archiveStarted = true;
       return capturePromise.then(function (capture) {
         var meta = {
@@ -1186,12 +1224,17 @@
             };
           })
         };
-        return historyStore.archive(meta, capture.blob);
+        return historyStore.archive(meta, capture.blob).then(function () {
+          toArchive.forEach(function (entry) { if (entry.ann.revision === entry.revision) entry.ann.archivedRevision = entry.revision; });
+        });
       });
     }).then(function () {
-      var flushed = snapshot.filter(function (entry) { return entry.ann.revision === entry.revision && anns.indexOf(entry.ann) !== -1; });
-      flushed.forEach(function (entry) { if (entry.ann.boxEl) entry.ann.boxEl.remove(); });
-      anns = anns.filter(function (a) { return !flushed.some(function (entry) { return entry.ann === a; }); });
+      var outcome = flushOutcome({ sentToInbox: sentToInbox, archivedNew: toArchive.length, count: items.length });
+      if (outcome.clear) {
+        var flushed = snapshot.filter(function (entry) { return entry.ann.revision === entry.revision && anns.indexOf(entry.ann) !== -1; });
+        flushed.forEach(function (entry) { if (entry.ann.boxEl) entry.ann.boxEl.remove(); });
+        anns = anns.filter(function (a) { return !flushed.some(function (entry) { return entry.ann === a; }); });
+      }
       historyRows = null;
       historyError = false;
       historyVisibleCount = 10;
@@ -1199,7 +1242,7 @@
       updateHistoryCount();
       refreshHistoryCount();
       renderList();
-      showToast((sentToInbox ? "Sent " : "Archived ") + items.length + " items ✓", false);
+      showToast(outcome.toast, outcome.isError);
     }).catch(function () {
       showToast(archiveStarted ? "Archive failed — items kept" : "Send failed — items kept", true);
     }).then(function () {
@@ -1358,7 +1401,7 @@
     screenshot: { ctrl: true, alt: false, shift: false, code: "Semicolon" },
     settings:   { ctrl: true, alt: false, shift: false, code: "Comma" }
   };
-  var HK_ORDER = [["toggle", "Show / hide"], ["write", "Write (annotate)"], ["list", "List"], ["copy", "Copy all"], ["send", "Send to AI"], ["screenshot", "Screenshot"], ["settings", "Open settings"]];
+  var HK_ORDER = [["toggle", "Show / hide"], ["write", "Write (annotate)"], ["list", "List"], ["copy", "Copy all"], ["send", "Send / Archive"], ["screenshot", "Screenshot"], ["settings", "Open settings"]];
   function cloneBinding(b) { return { ctrl: !!b.ctrl, alt: !!b.alt, shift: !!b.shift, code: String(b.code) }; }
   function safeLS(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 
@@ -1371,7 +1414,7 @@
   // NEXT trigger restores it. Hotkeys are stored globally; theme per project.
   var INJECTED = (window.__FFB_SETTINGS && typeof window.__FFB_SETTINGS === "object") ? window.__FFB_SETTINGS : {};
   var PROJECT = window.__FFB_PROJECT || "default";
-  function persist(partial) { if (typeof window.__FFB_SAVE === "function") { try { window.__FFB_SAVE(partial); } catch (e) {} } }
+  function persist(partial) { if (typeof window.__FFB_SAVE === "function") { try { window.__FFB_SAVE(partial).catch(function () { showToast("Settings save failed", true); }); } catch (e) { showToast("Settings save failed", true); } } }
 
   var hotkeys = (function () {
     var h = {}; for (var k in DEFAULT_HOTKEYS) h[k] = cloneBinding(DEFAULT_HOTKEYS[k]);

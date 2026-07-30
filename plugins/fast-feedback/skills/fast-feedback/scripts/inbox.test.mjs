@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, readdir, rmdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
-import { appendItems, count, peek, readAndClear, withLock } from "./inbox.mjs";
+import { appendItems, count, inboxPath, peek, readAndClear, readSessions, withLock, writeSession } from "./inbox.mjs";
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -25,6 +25,147 @@ async function assertMirrorMatchesSpool(dir) {
   const mirror = jsonl.trim() ? jsonl.trim().split("\n").map((line) => JSON.parse(line)) : [];
   assert.deepEqual(mirror, await peek());
 }
+
+test("inboxPath resolves the configured inbox or the current directory default", { concurrency: false }, () => {
+  const previous = process.env.FFB_INBOX;
+  try {
+    delete process.env.FFB_INBOX;
+    assert.equal(inboxPath(), join(process.cwd(), ".ffb"));
+
+    process.env.FFB_INBOX = "feedback-inbox";
+    assert.equal(inboxPath(), resolve("feedback-inbox"));
+  } finally {
+    if (previous === undefined) delete process.env.FFB_INBOX;
+    else process.env.FFB_INBOX = previous;
+  }
+});
+
+test("writeSession and readSessions use exactly one .ffb directory segment", { concurrency: false }, async () => {
+  const previous = process.env.FFB_INBOX;
+  const root = await mkdtemp(join(tmpdir(), "ffb-session-"));
+  const cwd = process.cwd();
+  try {
+    delete process.env.FFB_INBOX;
+    process.chdir(root);
+    const first = { id: "first-session", mode: "static", version: "0.3.0", url: "http://127.0.0.1:5000", started_at: "2026-07-28T12:00:00.000Z" };
+    const firstMarker = { ...first, uptime_ms: 100000 };
+    await writeSession(first, { uptime: () => 100 });
+    assert.deepEqual(await readSessions(), [firstMarker]);
+    assert.equal(inboxPath(), join(root, ".ffb"));
+    assert.equal(await readFile(join(root, ".ffb", "sessions", "first-session.json"), "utf8"), JSON.stringify(firstMarker));
+    assert.equal(join(root, ".ffb", "sessions", "first-session.json").match(/\.ffb/g).length, 1);
+    process.chdir(cwd);
+
+    const configured = join(root, "configured-inbox");
+    process.env.FFB_INBOX = configured;
+    const second = { ...first, id: "second-session", mode: "proxy", url: "http://127.0.0.1:5001" };
+    const secondMarker = { ...second, uptime_ms: 101000 };
+    await writeSession(second, { uptime: () => 101 });
+    assert.deepEqual(await readSessions(), [secondMarker]);
+    assert.equal(await readFile(join(configured, "sessions", "second-session.json"), "utf8"), JSON.stringify(secondMarker));
+    await writeFile(join(configured, "session.json"), "malformed", "utf8");
+    assert.deepEqual(await readSessions(), [secondMarker]);
+  } finally {
+    process.chdir(cwd);
+    if (previous === undefined) delete process.env.FFB_INBOX;
+    else process.env.FFB_INBOX = previous;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("writeSession replaces a prior server on its URL while retaining other markers", async () => {
+  await withInbox(async () => {
+    for (let index = 0; index < 9; index += 1) {
+      await writeSession({
+        id: "session-" + index,
+        mode: "static",
+        version: "0.3.0",
+        url: "http://127.0.0.1:" + (5000 + index),
+        started_at: "2026-07-28T12:00:0" + index + ".000Z",
+      });
+    }
+    assert.deepEqual((await readSessions()).map(({ id }) => id), ["session-0", "session-1", "session-2", "session-3", "session-4", "session-5", "session-6", "session-7", "session-8"]);
+
+    const restarted = { id: "restarted", mode: "proxy", version: "0.3.0", url: "http://127.0.0.1:5008", started_at: "2026-07-28T12:01:00.000Z" };
+    await writeSession(restarted);
+    assert.deepEqual((await readSessions()).map(({ id }) => id), ["session-0", "session-1", "session-2", "session-3", "session-4", "session-5", "session-6", "session-7", "restarted"]);
+  });
+});
+
+test("writeSession prunes markers only after a reboot", async () => {
+  await withInbox(async (dir) => {
+    const marker = (id, uptime_ms) => ({ id, mode: "static", version: "0.3.0", url: "http://127.0.0.1:" + id, started_at: "2026-07-28T12:00:00.000Z", ...(uptime_ms === undefined ? {} : { uptime_ms }) });
+    const beforeReboot = marker("before-reboot", 125001);
+    const liveAfterForwardClockStep = marker("live-after-forward-clock-step", 123000);
+    const earlierThisBoot = marker("earlier-this-boot", 122999);
+    const legacy = marker("legacy");
+    const sessionsDir = join(dir, "sessions");
+    await mkdir(sessionsDir);
+    await Promise.all([beforeReboot, liveAfterForwardClockStep, earlierThisBoot, legacy].map((session) => writeFile(join(sessionsDir, session.id + ".json"), JSON.stringify(session), "utf8")));
+
+    assert.deepEqual((await readdir(sessionsDir)).sort(), ["before-reboot.json", "earlier-this-boot.json", "legacy.json", "live-after-forward-clock-step.json"]);
+
+    await writeSession(marker("current"), { now: () => Date.parse("2030-01-01T00:00:00.000Z"), uptime: () => 124 });
+
+    assert.deepEqual((await readdir(sessionsDir)).sort(), ["current.json", "earlier-this-boot.json", "legacy.json", "live-after-forward-clock-step.json"]);
+    assert.deepEqual((await readSessions()).map(({ id }) => id).sort(), ["current", "earlier-this-boot", "legacy", "live-after-forward-clock-step"]);
+  });
+});
+
+test("writeSession retains a same-boot marker written after its uptime stamp", async () => {
+  await withInbox(async (dir) => {
+    const live = { id: "live", mode: "static", version: "0.3.0", url: "http://127.0.0.1:5000", started_at: "2026-07-28T12:00:00.000Z", uptime_ms: 15000 };
+    const current = { id: "current", mode: "proxy", version: "0.3.0", url: "http://127.0.0.1:5001", started_at: "2026-07-28T12:00:01.000Z" };
+    const sessionsDir = join(dir, "sessions");
+    await mkdir(sessionsDir);
+    await writeFile(join(sessionsDir, "live.json"), JSON.stringify(live), "utf8");
+
+    let calls = 0;
+    await writeSession(current, { uptime: () => (calls++ === 0 ? 10 : 20) });
+
+    assert.deepEqual((await readdir(sessionsDir)).sort(), ["current.json", "live.json"]);
+  });
+});
+
+test("concurrent writeSession calls retain both server markers", async () => {
+  await withInbox(async (dir) => {
+    const first = { id: "first-session", mode: "static", version: "0.3.0", url: "http://127.0.0.1:5000", started_at: "2026-07-28T12:00:00.000Z" };
+    const second = { id: "second-session", mode: "proxy", version: "0.3.0", url: "http://127.0.0.1:5001", started_at: "2026-07-28T12:00:01.000Z" };
+
+    await Promise.all([writeSession(first, { uptime: () => 100 }), writeSession(second, { uptime: () => 101 })]);
+
+    assert.deepEqual(await readSessions(), [{ ...first, uptime_ms: 100000 }, { ...second, uptime_ms: 101000 }]);
+    assert.deepEqual(await readdir(join(dir, "sessions")), ["first-session.json", "second-session.json"]);
+    await assert.rejects(stat(join(dir, ".lock")), { code: "ENOENT" });
+  });
+});
+
+test("readSessions merges both legacy marker forms after per-server markers", async () => {
+  await withInbox(async (dir) => {
+    const current = { id: "current", mode: "static", version: "0.3.0", url: "http://127.0.0.1:5000", started_at: "2026-07-28T12:00:02.000Z" };
+    const legacySingle = { id: "legacy-single", mode: "proxy", version: "0.3.0", url: "http://127.0.0.1:5001", started_at: "2026-07-28T12:00:00.000Z" };
+    const legacyList = { id: "legacy-list", mode: "static", version: "0.3.0", url: "http://127.0.0.1:5002", started_at: "2026-07-28T12:00:01.000Z" };
+    const currentMarker = { ...current, uptime_ms: 100000 };
+    await writeSession(current, { uptime: () => 100 });
+
+    await writeFile(join(dir, "session.json"), JSON.stringify(legacySingle), "utf8");
+    assert.deepEqual(await readSessions(), [legacySingle, currentMarker]);
+
+    await writeFile(join(dir, "session.json"), JSON.stringify({ sessions: [legacyList, current] }), "utf8");
+    assert.deepEqual(await readSessions(), [legacyList, currentMarker]);
+  });
+});
+
+test("writeSession rejects ids that could escape the sessions directory", async () => {
+  await withInbox(async (dir) => {
+    await assert.rejects(
+      writeSession({ id: "../outside", mode: "static", version: "0.3.0", url: "http://127.0.0.1:5000", started_at: "2026-07-28T12:00:00.000Z" }),
+      /safe filename/,
+    );
+    await assert.rejects(stat(join(dir, "outside.json")), { code: "ENOENT" });
+    assert.deepEqual(await readSessions(), []);
+  });
+});
 
 test("appendItems atomically spools every item and regenerates both mirrors", async () => {
   await withInbox(async (dir) => {
