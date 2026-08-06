@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rmdir, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rmdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { appendItems, count, inboxPath, peek, readAndClear, readSessions, withLock, writeSession } from "./inbox.mjs";
+import { appendItems, count, inboxPath, peek, readAndClear, readSessions, removePending, withLock, writeSession } from "./inbox.mjs";
+import { createQueued, markProcessing, readStatuses } from "./progress.mjs";
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -228,6 +229,78 @@ test("peek and count retain pending items until readAndClear consumes them", asy
     assert.deepEqual(await readAndClear(), []);
     assert.equal(await readFile(join(dir, "inbox.jsonl"), "utf8"), "");
     assert.equal(await readFile(join(dir, "inbox.md"), "utf8"), "(no feedback yet)\n");
+  });
+});
+
+test("readAndClear reports delivered items to its hook while peek does not", async () => {
+  await withInbox(async () => {
+    const progressId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const itemId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const legacy = { comment: "no progress record" };
+    const tracked = { id: itemId, comment: "mark me", progress_id: progressId };
+    const calls = [];
+    await createQueued([{ progress_id: progressId, item_id: itemId, sent_at: "2026-08-06T12:00:00.000Z" }]);
+    await appendItems([legacy, tracked]);
+
+    assert.equal((await peek()).length, 2);
+    assert.deepEqual(calls, []);
+    assert.equal((await readStatuses([progressId]))[0].status, "queued");
+
+    const delivered = await readAndClear({ onDelivered: async (items) => {
+      calls.push(items);
+      await markProcessing(items.flatMap((item) => item.progress_id ? [item.progress_id] : []));
+      assert.deepEqual(items.map(({ comment }) => comment).sort(), ["mark me", "no progress record"]);
+    } });
+
+    assert.deepEqual(calls, [delivered]);
+    assert.deepEqual(delivered.map(({ comment }) => comment).sort(), ["mark me", "no progress record"]);
+    const [status] = await readStatuses([progressId]);
+    assert.equal(status.status, "processing");
+    assert.ok(Number.isFinite(Date.parse(status.claimed_at)));
+  });
+});
+
+test("readAndClear logs a delivery hook failure without losing feedback", async () => {
+  await withInbox(async () => {
+    const item = { comment: "still delivered", progress_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" };
+    const errors = [];
+    const originalError = console.error;
+    console.error = (error) => errors.push(error);
+    try {
+      await appendItems([item]);
+      const delivered = await readAndClear({ onDelivered: async () => { throw new Error("progress unavailable"); } });
+      assert.deepEqual(delivered.map(({ id, ...entry }) => entry), [item]);
+      assert.equal(await count(), 0);
+      assert.equal(errors.length, 1);
+      assert.match(errors[0].message, /progress unavailable/);
+    } finally {
+      console.error = originalError;
+    }
+  });
+});
+
+test("removePending removes only pending annotation ids and refreshes mirrors", async () => {
+  await withInbox(async (dir) => {
+    const firstId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const secondId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const absentId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    await appendItems([{ id: firstId, comment: "cancel" }, { id: secondId, comment: "keep" }]);
+
+    assert.deepEqual(await removePending([firstId, absentId]), [firstId]);
+    assert.deepEqual(await peek(), [{ id: secondId, comment: "keep" }]);
+    assert.equal(await readFile(join(dir, "inbox.jsonl"), "utf8"), JSON.stringify({ id: secondId, comment: "keep" }) + "\n");
+    assert.match(await readFile(join(dir, "inbox.md"), "utf8"), /keep/);
+    assert.deepEqual(await removePending([firstId]), []);
+  });
+});
+
+test("removePending reports an already claimed item as not removed", async () => {
+  await withInbox(async (dir) => {
+    const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    await appendItems([{ id, comment: "claimed" }]);
+    await rename(join(dir, "pending", id + ".json"), join(dir, "pending", id + ".json.bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.claimed"));
+
+    assert.deepEqual(await removePending([id]), []);
   });
 });
 
