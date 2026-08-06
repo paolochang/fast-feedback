@@ -42,8 +42,8 @@
     // controls (the list icon and the box's corner button) must land on the same
     // deep red in a given theme. Collapsing them would either wash out delete or
     // make error text unreadable.
-    ':root{--__ffb_gold:#e8b23f;--__ffb_onaccent:#231a00;--__ffb_hlfill:rgba(232,178,63,.14);--__ffb_hlflash:rgba(232,178,63,.5);--__ffb_ink:#e8eaf0;--__ffb_mut:#8b93a6;--__ffb_surf:#12151c;--__ffb_head:#0f1218;--__ffb_line:#2b3140;--__ffb_field:#0e1116;--__ffb_card:#171b23;--__ffb_btn:#1b2029;--__ffb_btnh:#222834;--__ffb_warn:#e06b5a;--__ffb_danger:#c0392b;--__ffb_listen:#241a04;--__ffb_chip:#39445a;--__ffb_chipink:#e2e7f0;--__ffb_shadow:rgba(0,0,0,.5);--__ffb_shadowbar:rgba(0,0,0,.34)}',
-    ':root.__ffb_light{--__ffb_gold:#e5484d;--__ffb_onaccent:#ffffff;--__ffb_hlfill:rgba(229,72,77,.13);--__ffb_hlflash:rgba(229,72,77,.4);--__ffb_ink:#1c2126;--__ffb_mut:#6b7480;--__ffb_surf:#f5f6f8;--__ffb_head:#eceef2;--__ffb_line:#e2e5ea;--__ffb_field:#ffffff;--__ffb_card:#ffffff;--__ffb_btn:#ffffff;--__ffb_btnh:#f0f1f4;--__ffb_warn:#c0392b;--__ffb_danger:#c0392b;--__ffb_listen:#fdeaea;--__ffb_chip:#e0e4ec;--__ffb_chipink:#3d4655;--__ffb_shadow:rgba(17,24,39,.16);--__ffb_shadowbar:rgba(17,24,39,.07)}',
+    ':root{--__ffb_gold:#e8b23f;--__ffb_onaccent:#231a00;--__ffb_hlfill:rgba(232,178,63,.14);--__ffb_hlflash:rgba(232,178,63,.5);--__ffb_ink:#e8eaf0;--__ffb_mut:#8b93a6;--__ffb_surf:#12151c;--__ffb_head:#0f1218;--__ffb_line:#2b3140;--__ffb_field:#0e1116;--__ffb_card:#171b23;--__ffb_btn:#1b2029;--__ffb_btnh:#222834;--__ffb_warn:#e06b5a;--__ffb_danger:#c0392b;--__ffb_ok:#4a9d6a;--__ffb_listen:#241a04;--__ffb_chip:#39445a;--__ffb_chipink:#e2e7f0;--__ffb_shadow:rgba(0,0,0,.5);--__ffb_shadowbar:rgba(0,0,0,.34)}',
+    ':root.__ffb_light{--__ffb_gold:#e5484d;--__ffb_onaccent:#ffffff;--__ffb_hlfill:rgba(229,72,77,.13);--__ffb_hlflash:rgba(229,72,77,.4);--__ffb_ink:#1c2126;--__ffb_mut:#6b7480;--__ffb_surf:#f5f6f8;--__ffb_head:#eceef2;--__ffb_line:#e2e5ea;--__ffb_field:#ffffff;--__ffb_card:#ffffff;--__ffb_btn:#ffffff;--__ffb_btnh:#f0f1f4;--__ffb_warn:#c0392b;--__ffb_danger:#c0392b;--__ffb_ok:#1f7a4d;--__ffb_listen:#fdeaea;--__ffb_chip:#e0e4ec;--__ffb_chipink:#3d4655;--__ffb_shadow:rgba(17,24,39,.16);--__ffb_shadowbar:rgba(17,24,39,.07)}',
     '.__ffb_bar,.__ffb_form,.__ffb_panel,.__ffb_box,.__ffb_layer,.__ffb_confirm,.__ffb_modal{box-sizing:border-box;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}',
     // top strip
     '.__ffb_bar{position:fixed;z-index:2147483645;top:0;left:0;right:0;height:' + BAR_H + 'px;display:flex;gap:8px;align-items:center;padding:0 12px;background:var(--__ffb_surf);border-bottom:1px solid var(--__ffb_line);box-shadow:0 1px 0 var(--__ffb_line),0 2px 14px var(--__ffb_shadowbar);color:var(--__ffb_ink)}',
@@ -121,6 +121,15 @@
     '.__ffb_ic{width:22px;height:22px;border-radius:6px;border:1px solid var(--__ffb_line);background:var(--__ffb_surf);color:var(--__ffb_ink);font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}',
     '.__ffb_ic:hover{border-color:var(--__ffb_gold)}',
     '.__ffb_ic.__ffb_del:hover{color:var(--__ffb_danger);border-color:var(--__ffb_danger)}',
+    '.__ffb_ic:disabled{opacity:.32;cursor:not-allowed}.__ffb_ic:disabled:hover{border-color:var(--__ffb_line);color:var(--__ffb_ink)}',
+    '.__ffb_box.locked .__ffb_bdel{opacity:.32;cursor:not-allowed}.__ffb_box.locked .__ffb_bdel:hover{background:var(--__ffb_mut)}',
+    '.__ffb_chip{display:inline-flex;align-items:center;gap:5px;width:max-content;margin:0 0 5px;padding:2px 7px;border-radius:999px;background:var(--__ffb_chip);color:var(--__ffb_chipink);font-size:10.5px;font-weight:700}',
+    '.__ffb_chipdot{width:6px;height:6px;border-radius:50%;background:currentColor}.__ffb_chip.__ffb_completed{color:var(--__ffb_ok)}',
+    '.__ffb_chip.__ffb_failed{color:var(--__ffb_warn)}.__ffb_chip .__ffb_spin{width:8px;height:8px;border-width:1.5px}',
+    '.__ffb_progress{display:none;flex-direction:column;gap:5px;margin-bottom:8px;color:var(--__ffb_mut);font-size:11.5px;font-weight:600}.__ffb_progress.open{display:flex}',
+    '.__ffb_progressbar{height:3px;border-radius:3px;background:var(--__ffb_line);overflow:hidden}.__ffb_progressbar i{display:block;height:100%;background:var(--__ffb_gold)}',
+    '.__ffb_cancel{background:var(--__ffb_btn);color:var(--__ffb_ink)}.__ffb_cancel:hover{color:var(--__ffb_danger);border-color:var(--__ffb_danger);background:var(--__ffb_btn)}',
+    '.__ffb_progresswarn{padding:7px 9px;border:1px solid var(--__ffb_warn);border-radius:7px;color:var(--__ffb_warn);font-size:11.5px}',
     '.__ffb_item textarea{box-sizing:border-box;width:100%;background:var(--__ffb_field);color:var(--__ffb_ink);border:1px solid var(--__ffb_line);border-radius:6px;padding:6px 8px;font-size:13px;font-family:inherit;resize:vertical;min-height:52px}',
     '.__ffb_item .__ffb_iact{display:flex;gap:6px;justify-content:flex-end;margin-top:6px}',
     '.__ffb_hist{display:flex;gap:9px}',
@@ -242,7 +251,7 @@
   document.head.appendChild(style);
 
   var FILE = window.__FFB_FILE || document.title || (location.pathname + location.search) || "frontend";
-  var anns = [];            // committed: {id, n, sel, region, comment, sentToInbox, revision, archivedRevision, boxEl, anchor}
+  var anns = [];            // committed: includes state, progressId, and untracked
   var counter = 0;
   var active = false, drawing = false, startPage = null, tempEl = null;
   var draft = null;         // in-progress NEW annotation: {sel, region, boxEl, anchor}
@@ -334,6 +343,25 @@
     };
   }
 
+  // Pure progress reducer. It returns a new status map and the settle decision;
+  // DOM and annotation mutation deliberately live with the caller.
+  function progressOutcome(current, updates) {
+    var next = {}, changed = false, locked = 0, completed = 0, terminal = 0;
+    Object.keys(current).forEach(function (id) { next[id] = current[id]; });
+    updates.forEach(function (item) {
+      var state = item.status === "unknown" ? null : item.status;
+      if (next[item.progress_id] !== state) changed = true;
+      next[item.progress_id] = state;
+    });
+    Object.keys(next).forEach(function (id) {
+      var state = next[id];
+      if (state === "queued" || state === "processing") locked++;
+      if (state === "completed") completed++;
+      if (state === "completed" || state === "failed" || state === "stalled" || state === null) terminal++;
+    });
+    return { states: next, changed: changed, locked: locked, completed: completed, settled: Object.keys(next).length > 0 && locked === 0 && terminal === Object.keys(next).length };
+  }
+
   var layer = document.createElement("div");
   layer.className = "__ffb_layer";
   root.appendChild(layer);
@@ -363,12 +391,15 @@
     '<button class="__ffb_x" title="Close">✕</button></div>' +
     '<div class="__ffb_tabs"><div class="__ffb_tabgroup"><button class="__ffb_tab sel" data-tab="live">Live<span id="__ffb_livecnt"></span></button><button class="__ffb_tab" data-tab="history">History<span id="__ffb_histcnt"></span></button></div><div class="__ffb_tabact" id="__ffb_tabact"></div></div>' +
     '<div class="__ffb_list" id="__ffb_items"></div>' +
-    '<div id="__ffb_foot" style="padding:10px 12px;border-top:1px solid var(--__ffb_line);display:flex">' +
+    '<div id="__ffb_foot" style="padding:10px 12px;border-top:1px solid var(--__ffb_line);display:flex;flex-direction:column">' +
+    '<div class="__ffb_progress" id="__ffb_progress"><span id="__ffb_progresstext"></span><span class="__ffb_progressbar"><i id="__ffb_progressfill"></i></span></div>' +
     '<button class="__ffb_btn primary" id="__ffb_psend" title="' + sendButton.title + '" style="flex:1;padding:8px 12px">' + sendButton.label + '</button></div>';
   root.appendChild(panel);
   var itemsEl = panel.querySelector("#__ffb_items");
   var activeListTab = "live", historyRows = null, historyLoading = false, historyError = false, historyCount = null, historyCountLoading = false;
   var historyVisibleCount = 10, historyObjectUrls = [], historyObserver = null, historyDetailId = null, historyDetailData = null, historyLightbox = null;
+  var progressCapable = typeof window.__FFB_PROGRESS === "function";
+  var progressTimer = null, progressFailures = 0, progressReading = false;
 
   // ---- confirm dialog ---------------------------------------------------
   var confirmEl = document.createElement("div");
@@ -623,7 +654,7 @@
   function submitForm() {
     if (!draft) { form.classList.remove("open"); return; }
     var n = ++counter;
-    var ann = { id: crypto.randomUUID(), n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), sentToInbox: false, revision: 0, archivedRevision: -1, boxEl: draft.boxEl, anchor: draft.anchor };
+    var ann = { id: crypto.randomUUID(), n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), sentToInbox: false, revision: 0, archivedRevision: -1, state: null, progressId: null, untracked: false, boxEl: draft.boxEl, anchor: draft.anchor };
     decorateBox(ann);
     anns.push(ann);
     draft = null;
@@ -638,8 +669,10 @@
     box.className = "__ffb_box";
     box.innerHTML = '<div class="__ffb_num">' + a.n + '</div><button class="__ffb_bdel" title="Delete this highlight"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button>';
     box.onclick = function () { openList(); flashBox(a.n); };
-    box.querySelector(".__ffb_bdel").onclick = function (e) { e.stopPropagation(); deleteAnn(a); };
+    box.querySelector(".__ffb_bdel").onclick = function (e) { e.stopPropagation(); if (!isLocked(a)) deleteAnn(a); };
   }
+  function isLocked(a) { return a.state === "queued" || a.state === "processing"; }
+  function isHeld(a) { return isLocked(a) || a.state === "completed"; }
   function deleteAnn(a) {
     confirmDiscard("Delete annotation [" + a.n + "]? This can't be undone.", function () {
       releaseAnchor(a);
@@ -829,6 +862,7 @@
     if (activeListTab === "history") renderHistory();
     else { clearHistoryThumbs(); renderLiveList(); }
     renderTabActions();
+    renderFooter();
   }
 
   function renderTabActions() {
@@ -845,7 +879,8 @@
     };
     if (activeListTab === "live") {
       var liveCopy = add("Copy", function () { copyTextAndFlash(buildExport(), liveCopy); });
-      add("Clear", clearAll);
+      var clearButton = add("Clear", clearAll);
+      if (anns.some(isLocked)) { clearButton.disabled = true; clearButton.title = "The AI is working on this"; }
       return;
     }
     if (historyDetailData && historyDetailData.id === historyDetailId) {
@@ -861,6 +896,7 @@
   function renderLiveList() {
     itemsEl.innerHTML = "";
     if (!anns.length) { itemsEl.innerHTML = '<div class="__ffb_empty">No feedback yet.<br>Arm Write and drag a box over the page.</div>'; return; }
+    if (progressFailures >= 20 && anns.some(isLocked)) itemsEl.innerHTML = '<div class="__ffb_progresswarn">Can\'t read progress</div>';
     anns.forEach(function (a) {
       var item = document.createElement("div");
       item.className = "__ffb_item"; item.setAttribute("data-n", a.n);
@@ -887,8 +923,10 @@
           if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); }
         });
       } else {
+        var locked = isHeld(a);
         item.innerHTML =
-          '<div class="__ffb_tools"><button class="__ffb_ic __ffb_edit" title="Edit">✎</button><button class="__ffb_ic __ffb_del" title="Delete">🗑</button></div>' +
+          '<div class="__ffb_tools"><button class="__ffb_ic __ffb_edit" title="' + (locked ? "The AI is working on this" : "Edit") + '"' + (locked ? " disabled" : "") + '>✎</button><button class="__ffb_ic __ffb_del" title="' + (locked ? "The AI is working on this" : "Delete") + '"' + (locked ? " disabled" : "") + '>🗑</button></div>' +
+          statusChipHtml(a) +
           '<div class="__ffb_hdrow"><span class="__ffb_n">[' + a.n + ']</span><span class="__ffb_isel">' + esc(a.sel) + '</span></div>' +
           '<div class="__ffb_cmt">' + (a.comment ? esc(a.comment) : '<span style="color:var(--__ffb_mut)">(no comment)</span>') + '</div>';
         item.querySelector(".__ffb_edit").onclick = function () { editingN = a.n; renderList(); flashBox(a.n); };
@@ -896,7 +934,33 @@
         item.addEventListener("mouseenter", function () { flashBox(a.n); });
       }
       itemsEl.appendChild(item);
+      if (a.boxEl) {
+        a.boxEl.classList.toggle("locked", isHeld(a));
+        var boxDelete = a.boxEl.querySelector(".__ffb_bdel");
+        if (boxDelete) { boxDelete.disabled = isHeld(a); boxDelete.title = isHeld(a) ? "The AI is working on this" : "Delete this highlight"; }
+      }
     });
+  }
+
+  function statusChipHtml(a) {
+    if (!progressCapable || !a.state) return "";
+    var labels = { queued: "Queued", processing: "Processing", completed: "Completed", failed: "Failed", stalled: "Stalled" };
+    var shape = a.state === "processing" ? '<span class="__ffb_spin"></span>' : '<span class="__ffb_chipdot"></span>';
+    return '<div class="__ffb_chip __ffb_' + a.state + '" data-progress-id="' + esc(a.progressId || "") + '" aria-live="polite">' + shape + labels[a.state] + (a.untracked ? " · untracked" : "") + '</div>';
+  }
+
+  function renderFooter() {
+    var locked = anns.filter(isLocked), tracked = anns.filter(function (a) { return !!a.progressId || a.untracked; });
+    var done = tracked.filter(function (a) { return a.state === "completed"; }).length;
+    var progress = panel.querySelector("#__ffb_progress"), button = panel.querySelector("#__ffb_psend");
+    if (progressCapable && locked.length) {
+      progress.classList.add("open");
+      panel.querySelector("#__ffb_progresstext").textContent = "AI working · " + done + "/" + tracked.length;
+      panel.querySelector("#__ffb_progressfill").style.width = (tracked.length ? Math.round(done / tracked.length * 100) : 0) + "%";
+      button.textContent = "Cancel"; button.title = "Cancel this batch"; button.className = "__ffb_btn __ffb_cancel";
+    } else {
+      progress.classList.remove("open"); button.textContent = sendButton.label; button.title = sendButton.title; button.className = "__ffb_btn primary";
+    }
   }
 
   function clearHistoryThumbs() {
@@ -1104,13 +1168,13 @@
   panel.querySelectorAll(".__ffb_tab").forEach(function (button) { button.onclick = function () { setListTab(button.getAttribute("data-tab")); }; });
   function closeList() { historyDetailId = null; clearHistoryThumbs(); panel.classList.remove("open"); }
   panel.querySelector(".__ffb_x").onclick = closeList;
-  panel.querySelector("#__ffb_psend").onclick = sendToAI;
+  panel.querySelector("#__ffb_psend").onclick = function () { if (progressCapable && anns.some(isLocked)) cancelBatch(); else sendToAI(); };
 
   // Clear wipes every committed annotation (and its box). Guarded by a confirm
   // since it's destructive and the boxes can't be recovered. Numbering restarts
   // at [1] afterwards so a fresh pass reads cleanly.
   function clearAll() {
-    if (!anns.length) return;
+    if (!anns.length || anns.some(isLocked)) return;
     confirmDiscard("Clear all " + anns.length + " feedback item" + (anns.length > 1 ? "s" : "") + "? This can't be undone.", function () {
       anns.forEach(function (a) { releaseAnchor(a); if (a.boxEl) a.boxEl.remove(); });
       anns = [];
@@ -1287,6 +1351,80 @@
     t.select(); try { document.execCommand("copy"); } catch (e) {} t.remove();
   }
 
+  function scheduleProgress() {
+    clearTimeout(progressTimer); progressTimer = null;
+    if (!progressCapable || document.hidden || !anns.some(function (a) { return isLocked(a) && a.progressId; })) return;
+    progressTimer = setTimeout(readProgress, progressFailures >= 3 ? 5000 : 1500);
+  }
+
+  function patchProgressChips() {
+    anns.forEach(function (a) {
+      var item = itemsEl.querySelector('[data-n="' + a.n + '"]');
+      if (!item) return;
+      var old = item.querySelector(".__ffb_chip"), holder = document.createElement("div");
+      holder.innerHTML = statusChipHtml(a);
+      if (old && holder.firstChild) old.replaceWith(holder.firstChild);
+      else if (old) old.remove();
+      else if (holder.firstChild) item.insertBefore(holder.firstChild, item.querySelector(".__ffb_hdrow"));
+      var held = isHeld(a);
+      item.querySelectorAll(".__ffb_ic").forEach(function (button) { button.disabled = held; button.title = held ? "The AI is working on this" : (button.classList.contains("__ffb_edit") ? "Edit" : "Delete"); });
+      if (a.boxEl) {
+        a.boxEl.classList.toggle("locked", held);
+        var boxDelete = a.boxEl.querySelector(".__ffb_bdel");
+        if (boxDelete) { boxDelete.disabled = held; boxDelete.title = held ? "The AI is working on this" : "Delete this highlight"; }
+      }
+    });
+    renderFooter(); renderTabActions();
+  }
+
+  function settleProgress(total) {
+    var completed = anns.filter(function (a) { return a.progressId && a.state === "completed"; });
+    var ids = anns.filter(function (a) { return a.progressId; }).map(function (a) { return a.progressId; });
+    completed.forEach(function (a) { releaseAnchor(a); if (a.boxEl) a.boxEl.remove(); });
+    anns = anns.filter(function (a) { return completed.indexOf(a) === -1; });
+    anns.forEach(function (a) { if (!isLocked(a)) { a.progressId = null; a.untracked = false; a.sentToInbox = false; } });
+    if (ids.length && typeof window.__FFB_WITHDRAW === "function") { try { Promise.resolve(window.__FFB_WITHDRAW(ids)).catch(function () {}); } catch (e) {} }
+    if (completed.length === total) { setListTab("history"); refreshHistoryCount(); showToast("All " + total + " items applied ✓", false); }
+    else renderList();
+  }
+
+  function readProgress() {
+    var tracked = anns.filter(function (a) { return isLocked(a) && a.progressId; });
+    if (!tracked.length || progressReading || document.hidden) { scheduleProgress(); return; }
+    progressReading = true;
+    var current = {}, total = anns.filter(function (a) { return !!a.progressId || a.untracked; }).length;
+    tracked.forEach(function (a) { current[a.progressId] = a.state; });
+    Promise.resolve(window.__FFB_PROGRESS(tracked.map(function (a) { return a.progressId; }))).then(function (reply) {
+      var result = progressOutcome(current, reply && reply.items || []);
+      progressFailures = 0;
+      anns.forEach(function (a) { if (a.progressId && Object.prototype.hasOwnProperty.call(result.states, a.progressId)) a.state = result.states[a.progressId]; });
+      if (result.settled && !anns.some(function (a) { return isLocked(a) && a.untracked; })) settleProgress(total);
+      else if (result.changed) patchProgressChips();
+    }).catch(function () {
+      progressFailures++;
+      if (progressFailures === 20) renderList();
+    }).then(function () { progressReading = false; scheduleProgress(); });
+  }
+
+  function cancelBatch() {
+    var batch = anns.filter(function (a) { return isLocked(a); });
+    var ids = batch.filter(function (a) { return a.progressId; }).map(function (a) { return a.progressId; });
+    if (typeof window.__FFB_WITHDRAW !== "function") return;
+    Promise.resolve(window.__FFB_WITHDRAW(ids)).then(function (reply) {
+      batch.forEach(function (a) { a.state = null; a.progressId = null; a.untracked = false; a.sentToInbox = false; });
+      progressFailures = 0; clearTimeout(progressTimer); progressTimer = null; renderList();
+      var withdrawn = reply && reply.withdrawn ? reply.withdrawn.length : 0;
+      var missed = reply && reply.already_delivered ? reply.already_delivered.length : 0;
+      showToast(withdrawn + " withdrawn" + (missed ? " · " + missed + " couldn't be cancelled" : ""), false);
+    }).catch(function () { showToast("Cancel failed · items kept", true); });
+  }
+
+  document.addEventListener("visibilitychange", function () {
+    if (!progressCapable) return;
+    if (document.hidden) { clearTimeout(progressTimer); progressTimer = null; }
+    else if (anns.some(isLocked)) readProgress();
+  });
+
   // ---- send to AI --------------------------------------------------------
   // Served file and live/proxy modes inject __FFB_SEND. Console/bookmarklet mode
   // archives locally through historyStore, keeping Copy All as the universal fallback.
@@ -1346,8 +1484,10 @@
     // stays independent of capture — inbox delivery must not hinge on html2canvas.
     var capturePromise = toArchive.length ? capturePng(true) : null;
     if (capturePromise) capturePromise.catch(function () {});   // send-fail paths discard it; avoid an unhandled rejection
-    Promise.resolve(request).then(function () {
-      if (canSend) {
+    var sendReply = null;
+    Promise.resolve(request).then(function (reply) {
+      sendReply = reply;
+      if (canSend && toSend.length) {
         sentToInbox = true;
         // Only mark the revision we actually sent as delivered. If the user edited
         // this annotation while the send was in flight (edit resets sentToInbox to
@@ -1366,8 +1506,8 @@
           // pixel width. Their ratio is the device-pixels-per-CSS-pixel factor,
           // which the History composite needs to size its chrome (composeHistoryShot).
           capture: { w: capture.w, h: capture.h, docW: capture.docW },
-          items: snapshot.map(function (entry, index) {
-            var item = items[index];
+          items: toArchive.map(function (entry) {
+            var item = items[snapshot.indexOf(entry)];
             return {
               id: entry.id,
               n: item.n,
@@ -1383,6 +1523,15 @@
       });
     }).then(function () {
       var outcome = flushOutcome({ sentToInbox: sentToInbox, archivedNew: toArchive.length, count: items.length, inFlight: items.length - toSend.length });
+      if (outcome.lock && progressCapable) {
+        editingN = null;
+        toSend.forEach(function (entry) {
+          var matches = sendReply && sendReply.items ? sendReply.items.filter(function (item) { return item.item_id === entry.id; }) : [];
+          entry.ann.state = "queued";
+          entry.ann.progressId = matches.length ? matches[0].progress_id : null;
+          entry.ann.untracked = sendReply && sendReply.progress === false || !entry.ann.progressId;
+        });
+      }
       if (outcome.clear) {
         var flushed = snapshot.filter(function (entry) { return entry.ann.revision === entry.revision && anns.indexOf(entry.ann) !== -1; });
         flushed.forEach(function (entry) { releaseAnchor(entry.ann); if (entry.ann.boxEl) entry.ann.boxEl.remove(); });
@@ -1396,6 +1545,7 @@
       refreshHistoryCount();
       renderList();
       showToast(outcome.toast, outcome.isError);
+      scheduleProgress();
     }).catch(function () {
       showToast(archiveStarted ? "Archive failed — items kept" : "Send failed — items kept", true);
     }).then(function () {
