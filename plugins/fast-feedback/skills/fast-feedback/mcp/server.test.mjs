@@ -9,6 +9,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { appendItems, writeSession } from "../scripts/inbox.mjs";
+import { createQueued, readStatuses } from "../scripts/progress.mjs";
 import { handleRequest, serveStdio, toolDefinitions, waitForFeedback } from "./server.mjs";
 
 async function withInbox(run) {
@@ -24,9 +25,12 @@ async function withInbox(run) {
   }
 }
 
-function toolCall(name) {
-  return handleRequest({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: {} } });
+function toolCall(name, args = {}) {
+  return handleRequest({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } });
 }
+
+const PROGRESS_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const ITEM_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 function runStatusProcess(source, environment = {}) {
   return new Promise((resolve, reject) => {
@@ -50,7 +54,7 @@ function runStatusProcess(source, environment = {}) {
 const updateCheckUrl = new URL("../scripts/update-check.mjs", import.meta.url).href;
 const serverUrl = new URL("./server.mjs", import.meta.url).href;
 
-test("initialize and tools/list expose the four schemas", async () => {
+test("initialize and tools/list expose the tool schemas", async () => {
   const initialized = await handleRequest({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
   const plugin = JSON.parse(await readFile(new URL("../../../.claude-plugin/plugin.json", import.meta.url), "utf8"));
   assert.equal(initialized.jsonrpc, "2.0");
@@ -66,9 +70,62 @@ test("initialize and tools/list expose the four schemas", async () => {
 
   const listed = await handleRequest({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
   assert.deepEqual(listed.result.tools, toolDefinitions);
-  assert.deepEqual(listed.result.tools.map(({ name }) => name), ["ffb_pull", "ffb_wait", "ffb_peek", "ffb_status"]);
+  assert.deepEqual(listed.result.tools.map(({ name }) => name), ["ffb_pull", "ffb_wait", "ffb_peek", "ffb_status", "ffb_complete"]);
   for (const tool of listed.result.tools) assert.equal(tool.inputSchema.type, "object");
   assert.match(listed.result.tools.find(({ name }) => name === "ffb_status").description, /inbox/);
+  const complete = listed.result.tools.find(({ name }) => name === "ffb_complete");
+  assert.deepEqual(complete.inputSchema, {
+    type: "object",
+    properties: {
+      ids: { type: "array", items: { type: "string" } },
+      status: { type: "string", enum: ["completed", "failed"], default: "completed" },
+    },
+    required: ["ids"],
+    additionalProperties: false,
+  });
+  assert.match(complete.description, /EACH item/);
+  assert.match(complete.description, /as soon as that item is finished/);
+  assert.match(complete.description, /do not batch until the end/);
+  assert.match(complete.description, /progress_id.*ffb_pull.*ffb_wait/);
+});
+
+test("ffb_complete receives tool arguments, defaults status, and treats unknown ids as success", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    await createQueued([{ progress_id: PROGRESS_ID, item_id: ITEM_ID, sent_at: "2026-08-01T12:00:00.000Z" }]);
+    const reply = await toolCall("ffb_complete", { ids: [PROGRESS_ID, "cccccccc-cccc-4ccc-8ccc-cccccccccccc"] });
+    assert.equal(reply.result.isError, false);
+    assert.deepEqual(JSON.parse(reply.result.content[0].text), {
+      updated: [PROGRESS_ID], unknown: ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"],
+    });
+    assert.equal((await readStatuses([PROGRESS_ID]))[0].status, "completed");
+  });
+});
+
+test("ffb_complete validates ids and status as clean tool errors", { concurrency: false }, async () => {
+  for (const args of [{}, { ids: "nope" }, { ids: [3] }, { ids: ["not-a-uuid"] }, { ids: [], status: "processing" }]) {
+    const reply = await toolCall("ffb_complete", args);
+    assert.equal(reply.result.isError, true);
+    assert.equal(typeof reply.result.content[0].text, "string");
+  }
+});
+
+test("pull marks only delivered items carrying progress_id as processing", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    await createQueued([{ progress_id: PROGRESS_ID, item_id: ITEM_ID, sent_at: "2026-08-01T12:00:00.000Z" }]);
+    await appendItems([{ id: ITEM_ID, progress_id: PROGRESS_ID }, { id: "legacy" }]);
+    await toolCall("ffb_pull");
+    assert.equal((await readStatuses([PROGRESS_ID]))[0].status, "processing");
+  });
+});
+
+test("wait marks delivered progress items as processing", { concurrency: false }, async () => {
+  await withInbox(async () => {
+    await createQueued([{ progress_id: PROGRESS_ID, item_id: ITEM_ID, sent_at: new Date().toISOString() }]);
+    const waiting = toolCall("ffb_wait");
+    setTimeout(() => appendItems([{ id: ITEM_ID, progress_id: PROGRESS_ID }]), 25);
+    await waiting;
+    assert.equal((await readStatuses([PROGRESS_ID]))[0].status, "processing");
+  });
 });
 
 test("ffb_status includes the current version before its lazy update check completes", { concurrency: false }, async () => {

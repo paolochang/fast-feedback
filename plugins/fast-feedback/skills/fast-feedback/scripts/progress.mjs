@@ -128,7 +128,7 @@ async function transition(ids, from, to, field, { now = Date.now } = {}) {
         unknown.push(id);
         continue;
       }
-      if (record.status !== from) continue;
+      if (!(Array.isArray(from) ? from.includes(record.status) : record.status === from)) continue;
       transitionTime ??= isoNow(now);
       await writeAtomically(path, JSON.stringify({ ...record, status: to, [field]: transitionTime }));
       updated.push(id);
@@ -143,7 +143,7 @@ export async function markProcessing(ids, options = {}) {
 
 export async function markSettled(ids, status, options = {}) {
   if (!TERMINAL_STATUSES.has(status)) throw new TypeError("status must be completed or failed");
-  return transition(ids, "processing", status, "settled_at", options);
+  return transition(ids, ["queued", "processing"], status, "settled_at", options);
 }
 
 function newestTimestamp(record) {
