@@ -21,9 +21,9 @@ function request({ port, method = "POST", path = "/__ffb__/send", headers = {}, 
   });
 }
 
-async function startServer(id = "test-session") {
+async function startServer(id = "test-session", dependencies = {}) {
   const server = http.createServer((request, response) => {
-    if (!core.handleFfbRoute(request, response, { port: server.address().port, id })) {
+    if (!core.handleFfbRoute(request, response, { port: server.address().port, id, ...dependencies })) {
       response.writeHead(404);
       response.end();
     }
@@ -146,14 +146,104 @@ test("handleFfbRoute sends valid feedback to the inbox", async () => {
       body: JSON.stringify([{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", comment: "Stored by serve core" }]),
     });
     assert.equal(response.status, 200);
+    const result = JSON.parse(response.body);
+    assert.equal(result.progress, true);
+    assert.equal(result.items.length, 1);
+    assert.match(result.items[0].progress_id, /^[0-9a-f-]{36}$/i);
     const pending = await readFile(join(inboxDir, "pending", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.json"), "utf8");
     assert.match(pending, /Stored by serve core/);
+    assert.match(pending, new RegExp(result.items[0].progress_id));
   } finally {
     await new Promise((resolve) => server.close(resolve));
     if (previousInbox === undefined) delete process.env.FFB_INBOX;
     else process.env.FFB_INBOX = previousInbox;
     await rm(inboxDir, { recursive: true, force: true });
   }
+});
+
+test("handleFfbRoute creates queued progress before publishing pending items", async () => {
+  const calls = [];
+  let queuedEntries;
+  let appendedItems;
+  const server = await startServer("test-session", {
+    progressApi: { createQueued: async (entries) => { calls.push("queued"); queuedEntries = entries; } },
+    inboxApi: {
+      appendItems: async (items) => { calls.push("append"); appendedItems = items; },
+      count: async () => 1,
+    },
+  });
+  try {
+    const response = await request({ port: server.address().port, path: "/__ffb__/send?overlay=1", headers: authorizedHeaders(server.address().port), body: JSON.stringify([{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }]) });
+    assert.equal(response.status, 200);
+    assert.deepEqual(calls, ["queued", "append"]);
+    assert.equal(queuedEntries[0].progress_id, appendedItems[0].progress_id);
+    assert.equal(queuedEntries[0].item_id, appendedItems[0].id);
+    assert.ok(Date.parse(queuedEntries[0].sent_at));
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+});
+
+test("handleFfbRoute delivers feedback when queued progress cannot be written", async () => {
+  let appended = false;
+  const server = await startServer("test-session", {
+    progressApi: { createQueued: async () => { throw new Error("locked"); } },
+    inboxApi: { appendItems: async () => { appended = true; }, count: async () => 1 },
+  });
+  try {
+    const response = await request({ port: server.address().port, headers: authorizedHeaders(server.address().port), body: JSON.stringify([{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }]) });
+    assert.equal(response.status, 200);
+    assert.equal(appended, true);
+    assert.equal(JSON.parse(response.body).progress, false);
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+});
+
+test("handleFfbRoute reads projected progress and validates bounded ids", async () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const server = await startServer("test-session", { progressApi: { readStatuses: async () => [{ progress_id: id, item_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", status: "processing", sent_at: "2026-01-01T00:00:00.000Z", claimed_at: "2026-01-01T00:01:00.000Z", settled_at: null }] } });
+  try {
+    const good = await request({ port: server.address().port, method: "GET", path: "/__ffb__/progress?ids=" + id, headers: { "x-ffb-token": core.FFB_SEND_TOKEN } });
+    assert.equal(good.status, 200);
+    assert.deepEqual(JSON.parse(good.body), { items: [{ progress_id: id, item_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", status: "processing", since: "2026-01-01T00:01:00.000Z" }] });
+    const bad = await request({ port: server.address().port, method: "GET", path: "/__ffb__/progress?ids=nope", headers: { "x-ffb-token": core.FFB_SEND_TOKEN } });
+    assert.equal(bad.status, 400);
+    const tooMany = Array.from({ length: 101 }, () => id).join(",");
+    const capped = await request({ port: server.address().port, method: "GET", path: "/__ffb__/progress?ids=" + tooMany, headers: { "x-ffb-token": core.FFB_SEND_TOKEN } });
+    assert.equal(capped.status, 400);
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+});
+
+test("handleFfbRoute withdraws queued spool items and deletes all requested records", async () => {
+  const queued = "11111111-1111-4111-8111-111111111111";
+  const processing = "22222222-2222-4222-8222-222222222222";
+  let removedItemIds;
+  let deletedIds;
+  const server = await startServer("test-session", {
+    progressApi: {
+      readStatuses: async () => [
+        { progress_id: queued, item_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", status: "queued" },
+        { progress_id: processing, item_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", status: "processing" },
+      ],
+      withdraw: async (ids) => { deletedIds = ids; },
+    },
+    inboxApi: { removePending: async (ids) => { removedItemIds = ids; return ids; } },
+  });
+  try {
+    const response = await request({ port: server.address().port, path: "/__ffb__/withdraw?overlay=1", headers: authorizedHeaders(server.address().port), body: JSON.stringify({ ids: [queued, processing] }) });
+    assert.equal(response.status, 200);
+    assert.deepEqual(removedItemIds, ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]);
+    assert.deepEqual(deletedIds, [queued, processing]);
+    assert.deepEqual(JSON.parse(response.body), { withdrawn: [queued], already_delivered: [processing] });
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+});
+
+test("renderBoot injects authenticated progress and withdraw helpers", async () => {
+  const calls = [];
+  const helpers = bootHelpers(async (url, options = {}) => { calls.push({ url, options }); return { ok: true, json: async () => ({ items: [] }) }; });
+  await helpers.__FFB_PROGRESS(["id"]);
+  await helpers.__FFB_WITHDRAW(["id"]);
+  assert.equal(calls[0].url, "/__ffb__/progress?ids=id");
+  assert.equal(calls[0].options.headers["x-ffb-token"], core.FFB_SEND_TOKEN);
+  assert.equal(calls[1].url, "/__ffb__/withdraw");
+  assert.equal(calls[1].options.headers["x-ffb-token"], core.FFB_SEND_TOKEN);
 });
 
 test("injectBoot inserts before the last closing body tag and appends without one", () => {

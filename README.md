@@ -116,6 +116,14 @@ A slim bar appears at the top of the page:
   to a PNG straight to your **clipboard**. Optionally also saved to a folder.
 - **⚙ Settings** — theme, highlight color, screenshot saving, and hotkeys.
 
+In served file and proxy mode, **Send to AI** keeps the sent batch in the Live
+list while the AI works. The items are locked and show their own queued,
+processing, completed, failed, or stalled status; the footer becomes **Cancel**,
+which withdraws only feedback the AI has not taken yet. Applied items settle one
+at a time; an all-completed batch moves to History after every item settles,
+while failed or stalled feedback remains in Live. Console snippet and bookmarklet
+mode has no progress tracking; use **Copy All** there.
+
 ### Hotkeys (defaults — all rebindable in ⚙)
 
 | Action | Default |

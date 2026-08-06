@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { createReadStream, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,10 +6,13 @@ import { bootAssignments, applyUpdate, saveScreenshot } from "./settings.mjs";
 import { inboxPath } from "./inbox.mjs";
 import * as inbox from "./inbox.mjs";
 import * as history from "./history.mjs";
+import * as progress from "./progress.mjs";
 import { isOwnProxyOrigin } from "./proxy-guards.mjs";
 
 const MAX_SEND_BODY_BYTES = 256 * 1024;
 const MAX_HISTORY_BODY_BYTES = 12 * 1024 * 1024;
+const MAX_PROGRESS_IDS = 100;
+const MAX_PROGRESS_QUERY_BYTES = 8 * 1024;
 
 // Minted once per server process and never logged; the injected boot script
 // embeds it and every /__ffb__ POST is checked against it.
@@ -63,11 +66,13 @@ const archiveFn = "window.__FFB_ARCHIVE=function(body){return fetch('/__ffb__/hi
 const historyReadFns = "window.__FFB_HISTORY_LIST=function(){return fetch('/__ffb__/history',{headers:{'x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "}}).then(function(r){if(!r.ok)throw new Error('History request failed: '+r.status);return r.json();});};" +
   "window.__FFB_HISTORY_META=function(id){return fetch('/__ffb__/history/'+id+'.json',{headers:{'x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "}}).then(function(r){if(!r.ok)throw new Error('History request failed: '+r.status);return r.json();});};" +
   "window.__FFB_HISTORY_BLOB=function(id){return fetch('/__ffb__/history/'+id+'.png',{headers:{'x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "}}).then(function(r){if(!r.ok)throw new Error('History request failed: '+r.status);return r.blob();});};";
+const progressFns = "window.__FFB_PROGRESS=function(ids){return fetch('/__ffb__/progress?ids='+encodeURIComponent(ids.join(',')),{headers:{'x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "}}).then(function(r){if(!r.ok)throw new Error('Progress request failed: '+r.status);return r.json();});};" +
+  "window.__FFB_WITHDRAW=function(ids){return fetch('/__ffb__/withdraw',{method:'POST',headers:{'content-type':'application/json','x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "},body:JSON.stringify({ids:ids})}).then(function(r){if(!r.ok)throw new Error('Withdraw failed: '+r.status);return r.json();});};";
 
 export function renderBoot({ fileLabel }) {
   const overlay = readFileSync(overlayPath, "utf8");
   const engine = (h2c + "\n" + overlay).replace(/<\/script/gi, "<\\/script");
-  return "\n<script>window.__FFB_FILE=" + JSON.stringify(fileLabel) + ";" + bootAssignments() + saveFn + saveShotFn + sendFn + archiveFn + historyReadFns + "</script>\n" +
+  return "\n<script>window.__FFB_FILE=" + JSON.stringify(fileLabel) + ";" + bootAssignments() + saveFn + saveShotFn + sendFn + archiveFn + historyReadFns + progressFns + "</script>\n" +
     "<script>\n" + engine + "\n</script>\n";
 }
 
@@ -81,9 +86,38 @@ export function injectBoot(html, boot) {
 // server), so stripping them here is fine.
 export const STRIP = new Set(["x-frame-options", "content-security-policy", "content-security-policy-report-only"]);
 
-export function handleFfbRoute(creq, cres, { port, mode = "static", id }) {
-  if (creq.method === "GET" && creq.url === "/__ffb__/ping") {
+export function handleFfbRoute(creq, cres, { port, mode = "static", id, inboxApi = inbox, progressApi = progress }) {
+  const requestUrl = new URL(creq.url, "http://localhost");
+  const pathname = requestUrl.pathname;
+  if (creq.method === "GET" && pathname === "/__ffb__/ping") {
     sendJson(cres, 200, { ffb: true, mode, id });
+    return true;
+  }
+
+  if (creq.method === "GET" && pathname === "/__ffb__/progress") {
+    if (creq.headers["x-ffb-token"] !== FFB_SEND_TOKEN) {
+      sendJson(cres, 403, { error: "forbidden" });
+      return true;
+    }
+    // Bound the raw target before decoding so percent-encoding cannot turn a
+    // small-looking request into unbounded progress reads.
+    if (Buffer.byteLength(creq.url) > MAX_PROGRESS_QUERY_BYTES) {
+      sendJson(cres, 400, { error: "too many progress ids" });
+      return true;
+    }
+    const ids = (requestUrl.searchParams.get("ids") || "").split(",").filter(Boolean);
+    if (!ids.length || ids.length > MAX_PROGRESS_IDS || ids.some((value) => !history.isUuid(value))) {
+      sendJson(cres, 400, { error: "progress ids must be UUIDs" });
+      return true;
+    }
+    progressApi.readStatuses(ids).then((records) => {
+      sendJson(cres, 200, { items: records.map((record) => ({
+        progress_id: record.progress_id,
+        item_id: record.item_id ?? null,
+        status: record.status,
+        since: record.settled_at || record.claimed_at || record.sent_at || null,
+      })) });
+    }).catch(() => sendJson(cres, 500, { error: "could not read progress" }));
     return true;
   }
 
@@ -139,8 +173,12 @@ export function handleFfbRoute(creq, cres, { port, mode = "static", id }) {
 
   // Feedback submissions stay on the loopback-only proxy. Check all request
   // guards before buffering/parsing a body, and never forward this route.
-  if (creq.method === "POST" && creq.url === "/__ffb__/send") {
-    if (creq.headers["x-ffb-token"] !== FFB_SEND_TOKEN || !isOwnProxyOrigin(creq.headers, port)) {
+  if (creq.method === "POST" && pathname === "/__ffb__/send") {
+    if (creq.headers["x-ffb-token"] !== FFB_SEND_TOKEN) {
+      sendJson(cres, 403, { error: "forbidden" });
+      return true;
+    }
+    if (!isOwnProxyOrigin(creq.headers, port)) {
       sendJson(cres, 403, { error: "forbidden" });
       return true;
     }
@@ -181,10 +219,83 @@ export function handleFfbRoute(creq, cres, { port, mode = "static", id }) {
         return;
       }
       try {
-        await inbox.appendItems(items);
-        sendJson(cres, 200, { ok: true, count: await inbox.count() });
+        const sentAt = new Date().toISOString();
+        const deliveries = items.map((item) => ({ ...item, progress_id: randomUUID() }));
+        let tracked = true;
+        try {
+          await progressApi.createQueued(deliveries.map((item) => ({ progress_id: item.progress_id, item_id: item.id, sent_at: sentAt })));
+        } catch {
+          tracked = false;
+        }
+        await inboxApi.appendItems(deliveries);
+        sendJson(cres, 200, {
+          ok: true,
+          count: await inboxApi.count(),
+          progress: tracked,
+          items: deliveries.map((item) => ({ item_id: item.id, progress_id: item.progress_id })),
+        });
       } catch (error) {
         sendJson(cres, 500, { error: "could not store feedback" });
+      }
+    });
+    return true;
+  }
+
+  if (creq.method === "POST" && pathname === "/__ffb__/withdraw") {
+    if (creq.headers["x-ffb-token"] !== FFB_SEND_TOKEN) {
+      sendJson(cres, 403, { error: "forbidden" });
+      return true;
+    }
+    if (!isOwnProxyOrigin(creq.headers, port)) {
+      sendJson(cres, 403, { error: "forbidden" });
+      return true;
+    }
+    if (String(creq.headers["content-type"] || "").split(";", 1)[0].trim().toLowerCase() !== "application/json") {
+      sendJson(cres, 415, { error: "content-type must be application/json" });
+      return true;
+    }
+    if (Number(creq.headers["content-length"] || 0) > MAX_SEND_BODY_BYTES) {
+      sendJson(cres, 413, { error: "request body too large" });
+      return true;
+    }
+    let size = 0;
+    let tooLarge = false;
+    const chunks = [];
+    creq.on("data", (chunk) => {
+      if (tooLarge) return;
+      size += chunk.length;
+      if (size > MAX_SEND_BODY_BYTES) {
+        tooLarge = true;
+        sendJson(cres, 413, { error: "request body too large" });
+        return;
+      }
+      chunks.push(chunk);
+    });
+    creq.on("end", async () => {
+      if (tooLarge) return;
+      let ids;
+      try {
+        ids = JSON.parse(Buffer.concat(chunks).toString("utf8"))?.ids;
+      } catch {
+        sendJson(cres, 400, { error: "invalid JSON" });
+        return;
+      }
+      if (!Array.isArray(ids) || ids.length > MAX_PROGRESS_IDS || ids.some((value) => !history.isUuid(value))) {
+        sendJson(cres, 400, { error: "progress ids must be UUIDs" });
+        return;
+      }
+      try {
+        const records = await progressApi.readStatuses(ids);
+        // A queued record may be displayed as stalled after its deadline; a
+        // missing claimed timestamp still identifies it as pending and safe to cancel.
+        const queued = records.filter((record) => (record.status === "queued" || (record.status === "stalled" && !record.claimed_at)) && record.item_id);
+        const removedItemIds = new Set(await inboxApi.removePending(queued.map((record) => record.item_id)));
+        const withdrawn = queued.filter((record) => removedItemIds.has(record.item_id)).map((record) => record.progress_id);
+        const withdrawnSet = new Set(withdrawn);
+        await progressApi.withdraw(ids);
+        sendJson(cres, 200, { withdrawn, already_delivered: ids.filter((progressId) => !withdrawnSet.has(progressId)) });
+      } catch {
+        sendJson(cres, 500, { error: "could not withdraw feedback" });
       }
     });
     return true;

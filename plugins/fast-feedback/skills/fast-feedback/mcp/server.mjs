@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
 import { count, inboxPath, peek, readAndClear, readSessions } from "../scripts/inbox.mjs";
+import { markProcessing, markSettled } from "../scripts/progress.mjs";
 import { isLoopbackHost } from "../scripts/proxy-guards.mjs";
 import { currentLatest, ensureVersionChecked, versionInfo } from "../scripts/update-check.mjs";
 
@@ -41,6 +42,19 @@ export const toolDefinitions = [
     name: "ffb_status",
     description: "Return the pending feedback count and inbox path being read.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "ffb_complete",
+    description: "Marks items as applied so the user's overlay stops showing them as in progress. Call this for EACH item as soon as that item is finished; do not batch until the end. Pass the progress_id values from the items that ffb_pull / ffb_wait returned.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ids: { type: "array", items: { type: "string" } },
+        status: { type: "string", enum: ["completed", "failed"], default: "completed" },
+      },
+      required: ["ids"],
+      additionalProperties: false,
+    },
   },
 ];
 
@@ -95,7 +109,15 @@ function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-export async function waitForFeedback(inbox = { count, readAndClear }) {
+async function readDelivered() {
+  return readAndClear({
+    onDelivered: (items) => markProcessing(items.flatMap(function (item) {
+      return item.progress_id ? [item.progress_id] : [];
+    })),
+  });
+}
+
+export async function waitForFeedback(inbox = { count, readAndClear: readDelivered }) {
   const deadline = Date.now() + waitTimeoutMs();
   while (Date.now() <= deadline) {
     if (await inbox.count()) {
@@ -109,10 +131,10 @@ export async function waitForFeedback(inbox = { count, readAndClear }) {
   return null;
 }
 
-export async function callTool(name) {
+export async function callTool(name, args = {}) {
   switch (name) {
     case "ffb_pull": {
-      const items = await readAndClear();
+      const items = await readDelivered();
       return textResult(items.length ? JSON.stringify(items) : "no pending feedback" + EMPTY_RESULT_POINTER);
     }
     case "ffb_wait": {
@@ -132,6 +154,13 @@ export async function callTool(name) {
       const status = { pending, inbox, server, version };
       if (server.state !== "running") status.hint = emptyStatusHint(inbox);
       return textResult(JSON.stringify(status));
+    }
+    case "ffb_complete": {
+      if (args === null || typeof args !== "object" || Array.isArray(args)) throw new TypeError("arguments must be an object");
+      const unexpected = Object.keys(args).filter((key) => key !== "ids" && key !== "status");
+      if (unexpected.length) throw new TypeError("unexpected argument: " + unexpected[0]);
+      const result = await markSettled(args.ids, args.status ?? "completed");
+      return textResult(JSON.stringify(result));
     }
     default:
       return textResult("Unknown tool: " + String(name), true);
@@ -179,7 +208,7 @@ export async function handleRequest(request) {
       return response(request.id, { tools: toolDefinitions });
     case "tools/call": {
       try {
-        return response(request.id, await callTool(request.params?.name));
+        return response(request.id, await callTool(request.params?.name, request.params?.arguments));
       } catch (error) {
         return response(request.id, textResult(error instanceof Error ? error.message : String(error), true));
       }

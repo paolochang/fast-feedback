@@ -293,7 +293,34 @@ export async function count() {
   return withLock(dir, async () => (await pendingFiles(pendingDir)).length);
 }
 
-export async function readAndClear({ remove = rm } = {}) {
+export async function removePending(itemIds) {
+  if (!Array.isArray(itemIds)) throw new TypeError("itemIds must be an array");
+
+  const { dir, pendingDir } = await ensureInbox();
+  return withLock(dir, async () => {
+    const removed = [];
+    for (const itemId of new Set(itemIds.filter(isUuid))) {
+      try {
+        await rm(join(pendingDir, itemId + ".json"));
+        removed.push(itemId);
+      } catch (error) {
+        // A claim rename makes the pending filename disappear. That is a normal
+        // lost cancellation race: delivery owns the item from that point on.
+        if (error?.code !== "ENOENT") throw error;
+      }
+    }
+    try {
+      await writeMirrors(dir, pendingDir);
+    } catch (error) {
+      // Mirrors are derived and self-healing; a failed refresh must not turn an
+      // already completed cancellation into a reported failure.
+      console.error(error);
+    }
+    return removed;
+  });
+}
+
+export async function readAndClear({ remove = rm, onDelivered } = {}) {
   const { dir, pendingDir } = await ensureInbox();
   return withLock(dir, async () => {
     await recoverAbandonedClaims(pendingDir);
@@ -336,11 +363,23 @@ export async function readAndClear({ remove = rm } = {}) {
       }
     }));
     const deliveredEntries = removed.filter(Boolean);
+    const deliveredItems = deliveredEntries.map(({ item }) => item);
+    if (onDelivered) {
+      try {
+        // This runs before releasing the inbox lock so delivery and its progress
+        // transition have one ordering point. Hooks must not re-enter this lock.
+        await onDelivered(deliveredItems);
+      } catch (error) {
+        // Claim deletion is authoritative. Progress is observational metadata,
+        // so its failure cannot revoke or hide feedback already delivered.
+        console.error(error);
+      }
+    }
     try {
       await writeMirrors(dir, pendingDir);
     } catch (error) {
       console.error(error);
     }
-    return deliveredEntries.map(({ item }) => item);
+    return deliveredItems;
   });
 }
