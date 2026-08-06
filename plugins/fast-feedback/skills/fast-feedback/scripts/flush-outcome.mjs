@@ -7,21 +7,27 @@ export function flushOutcome(flush) {
   var sentToInbox = flush.sentToInbox;
   var archivedNew = flush.archivedNew;
   var count = flush.count;
+  var inFlight = flush.inFlight;
 
   if (count === 0) {
-    return { clear: false, toast: "Nothing new to send", isError: false };
+    return { clear: false, lock: false, toast: "Nothing new to send", isError: false };
   }
 
   if (sentToInbox === true) {
-    return { clear: true, toast: "Sent " + count + " items ✓", isError: false };
+    return { clear: false, lock: true, toast: "Sent " + count + " items · AI is working…", isError: false };
+  }
+
+  if (inFlight > 0) {
+    return { clear: false, lock: false, toast: "Already sent — the AI is working on these", isError: false };
   }
 
   if (archivedNew === 0) {
-    return { clear: false, toast: "Already archived — the AI did not receive this. Use Copy All.", isError: true };
+    return { clear: false, lock: false, toast: "Already archived — the AI did not receive this. Use Copy All.", isError: true };
   }
 
   return {
     clear: false,
+    lock: false,
     toast: "Archived " + count + " locally — the AI did not receive this. Use Copy All.",
     isError: true,
   };
