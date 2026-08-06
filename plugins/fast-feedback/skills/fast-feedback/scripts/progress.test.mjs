@@ -62,11 +62,11 @@ test("transitions are monotonic and terminal records are never reopened", async 
   });
 });
 
-test("settling requires processing and mutations report unknown ids", async () => {
+test("settling accepts queued records and mutations report unknown ids", async () => {
   await withProgress(async () => {
     await createQueued([queued()]);
-    assert.deepEqual(await markSettled([FIRST, SECOND], "failed"), { updated: [], unknown: [SECOND] });
-    assert.equal((await readStatuses([FIRST], { now: () => Date.parse("2026-08-01T12:01:00.000Z") }))[0].status, "queued");
+    assert.deepEqual(await markSettled([FIRST, SECOND], "completed"), { updated: [FIRST], unknown: [SECOND] });
+    assert.equal((await readStatuses([FIRST], { now: () => Date.parse("2026-08-01T12:01:00.000Z") }))[0].status, "completed");
     await assert.rejects(markSettled([FIRST], "processing"), /completed or failed/);
   });
 });
