@@ -121,7 +121,7 @@ non-MCP clients, human reviewers, and web chat: paste the copied feedback into
 the conversation as usual.
 
 Claude Code auto-registers the Fast Feedback MCP server when this plugin is
-installed. It provides four tools:
+installed. It provides five tools:
 
 - `ffb_pull` reads and clears all pending feedback.
 - `ffb_wait` waits for feedback, then reads and clears it.
@@ -133,12 +133,26 @@ installed. It provides four tools:
   one answers. It includes the selected server's `mode`, `url`, and
   `started_at`. `version` is `{ current, latest, outdated }`. A `hint` is
   included when the server is not running.
+- `ffb_complete` marks delivered items `completed` or `failed`. Pass the
+  `progress_id` returned with each item, and call it for that item as soon as
+  its change lands. The completion record does not persist a note.
 
-For the **watch loop** (review mode), call `ffb_wait`, apply the returned
-feedback, then call `ffb_wait` again to re-arm it. For clients that do not support
-long-polling, call `ffb_pull` once when the user says they sent feedback. Codex
-and Cursor need a one-time `mcp add` registration for this server; they do not
-need to add it for each use.
+For the **watch loop** (review mode), call `ffb_wait`; it claims the whole pending
+batch, so every returned item changes from `queued` to `processing` together.
+Apply one item, report that item to the user as soon as its change lands, then
+call `ffb_complete` with that item's `progress_id`. Repeat item by item, and only
+then call `ffb_wait` again for the next batch. Do not save the reports or
+completions until the end: the user watches the items settle individually. For
+clients that do not support long-polling, call `ffb_pull` once when the user says
+they sent feedback, then use the same per-item completion loop. Codex and Cursor
+need a one-time `mcp add` registration for this server; they do not need to add
+it for each use.
+
+A queued item is shown as `stalled` after 30 minutes; a processing item is shown
+as `stalled` after 10 minutes. These are fixed deadlines. `stalled` does not
+cancel or remove the feedback: it unlocks the item in the overlay but leaves it
+pending. The overlay's **Cancel** action withdraws only queued items the AI has
+not claimed. Items already taken for processing are reported as not cancelled.
 
 When `ffb_peek`, `ffb_pull`, or `ffb_wait` returns empty, call `ffb_status` to
 diagnose the server and inbox being read. Their non-empty output is unchanged.
@@ -153,7 +167,8 @@ or fall back to the snippet below. Rare HMR setups that hard-code the client
 port may need a one-line dev-config tweak. It is not meant to wrap arbitrary
 third-party/production sites (auth cookies, service workers, strict CSP). In
 console/bookmarklet mode, **Send to AI cannot reach the AI** because there is no
-server to receive it; **Copy All** is the only path to the AI.
+server to receive it; **Copy All** is the only path to the AI. This mode has no
+progress tracking.
 
 ## Live mode — console / bookmarklet (fallback)
 
@@ -212,6 +227,14 @@ user:
   corner**, grey until you hover it and then the same red.
   Editing is inline; closing a changed edit asks before reverting. Deleting
   asks first (**Cancel / Discard**).
+- after **Send to AI** succeeds in served file or live/proxy mode, the sent
+  items stay in **Live**, locked against editing, deletion, and clearing. Each
+  has its own `Queued`, `Processing`, `Completed`, `Failed`, or `Stalled` status.
+  The footer's Send button becomes **Cancel** while the batch is queued or
+  processing; Cancel withdraws only items the AI has not taken yet. An
+  all-completed batch leaves Live for History only after every item has settled.
+  Failed or stalled items are unlocked and remain in Live rather than being
+  treated as applied.
 - the right-hand end of the tab row carries the actions for whatever is on screen.
   On **Live** that's **Copy** and **Clear** — Clear wipes every note after a
   confirm (**Cancel / Clear**) and restarts numbering at [1]. On the **History**

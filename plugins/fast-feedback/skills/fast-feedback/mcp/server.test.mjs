@@ -53,6 +53,12 @@ function runStatusProcess(source, environment = {}) {
 
 const updateCheckUrl = new URL("../scripts/update-check.mjs", import.meta.url).href;
 const serverUrl = new URL("./server.mjs", import.meta.url).href;
+const pluginVersion = JSON.parse(await readFile(new URL("../../../.claude-plugin/plugin.json", import.meta.url), "utf8")).version;
+
+function nextPatchVersion(version) {
+  const [major, minor, patch] = version.split(".").map(Number);
+  return `${major}.${minor}.${patch + 1}`;
+}
 
 test("initialize and tools/list expose the tool schemas", async () => {
   const initialized = await handleRequest({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
@@ -137,17 +143,17 @@ test("ffb_status includes the current version before its lazy update check compl
 });
 
 test("ffb_status reports the cached latest version", { concurrency: false }, async () => {
-  const plugin = JSON.parse(await readFile(new URL("../../../.claude-plugin/plugin.json", import.meta.url), "utf8"));
+  const newerVersion = nextPatchVersion(pluginVersion);
   const child = await runStatusProcess(`
     import { ensureVersionChecked } from ${JSON.stringify(updateCheckUrl)};
-    await ensureVersionChecked({ fetchImpl: async () => '{"plugins":[{"name":"fast-feedback","version":"0.3.1"}]}' });
+    await ensureVersionChecked({ fetchImpl: async () => ${JSON.stringify(JSON.stringify({ plugins: [{ name: "fast-feedback", version: newerVersion }] }))} });
     const { callTool } = await import(${JSON.stringify(serverUrl)});
     process.stdout.write(JSON.stringify(await callTool("ffb_status")));
   `);
   assert.equal(child.code, 0, child.stderr);
   assert.deepEqual(JSON.parse(JSON.parse(child.stdout).content[0].text).version, {
-    current: plugin.version,
-    latest: "0.3.1",
+    current: pluginVersion,
+    latest: newerVersion,
     outdated: true,
   });
 });

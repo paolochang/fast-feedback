@@ -45,7 +45,7 @@ export const toolDefinitions = [
   },
   {
     name: "ffb_complete",
-    description: "Call this for EACH item as soon as that item is finished; do not batch until the end. Pass the progress_id values from the items that ffb_pull / ffb_wait returned.",
+    description: "Marks items as applied so the user's overlay stops showing them as in progress. Call this for EACH item as soon as that item is finished; do not batch until the end. Pass the progress_id values from the items that ffb_pull / ffb_wait returned.",
     inputSchema: {
       type: "object",
       properties: {
