@@ -4,10 +4,20 @@ import test from "node:test";
 
 import { flushOutcome, sendLabel } from "./flush-outcome.mjs";
 
-test("flushOutcome clears Live feedback after inbox delivery", () => {
+test("flushOutcome locks Live feedback after inbox delivery", () => {
   assert.deepEqual(flushOutcome({ sentToInbox: true, count: 3 }), {
-    clear: true,
-    toast: "Sent 3 items ✓",
+    clear: false,
+    lock: true,
+    toast: "Sent 3 items · AI is working…",
+    isError: false,
+  });
+});
+
+test("flushOutcome reports feedback that is already in flight", () => {
+  assert.deepEqual(flushOutcome({ sentToInbox: false, archivedNew: 0, count: 2, inFlight: 2 }), {
+    clear: false,
+    lock: false,
+    toast: "Already sent — the AI is working on these",
     isError: false,
   });
 });
@@ -15,6 +25,7 @@ test("flushOutcome clears Live feedback after inbox delivery", () => {
 test("flushOutcome reports already archived feedback when no local archive is new", () => {
   assert.deepEqual(flushOutcome({ sentToInbox: false, archivedNew: 0, count: 2 }), {
     clear: false,
+    lock: false,
     toast: "Already archived — the AI did not receive this. Use Copy All.",
     isError: true,
   });
@@ -23,6 +34,7 @@ test("flushOutcome reports already archived feedback when no local archive is ne
 test("flushOutcome reports a new local archive when delivery is not confirmed", () => {
   assert.deepEqual(flushOutcome({ sentToInbox: false, archivedNew: 2, count: 2 }), {
     clear: false,
+    lock: false,
     toast: "Archived 2 locally — the AI did not receive this. Use Copy All.",
     isError: true,
   });
@@ -32,6 +44,7 @@ test("flushOutcome reports no work for an empty flush regardless of delivery", (
   for (const sentToInbox of [true, false, undefined]) {
     assert.deepEqual(flushOutcome({ sentToInbox, count: 0 }), {
       clear: false,
+      lock: false,
       toast: "Nothing new to send",
       isError: false,
     });
@@ -45,6 +58,7 @@ test("flushOutcome source is a self-contained function declaration", () => {
   assert.match(source, /function/);
   for (const input of [
     { sentToInbox: true, count: 4 },
+    { sentToInbox: false, archivedNew: 0, count: 4, inFlight: 4 },
     { sentToInbox: false, archivedNew: 0, count: 4 },
     { sentToInbox: false, archivedNew: 4, count: 4 },
     { sentToInbox: true, count: 0 },

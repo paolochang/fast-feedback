@@ -297,21 +297,27 @@
     var sentToInbox = flush.sentToInbox;
     var archivedNew = flush.archivedNew;
     var count = flush.count;
+    var inFlight = flush.inFlight;
 
     if (count === 0) {
-      return { clear: false, toast: "Nothing new to send", isError: false };
+      return { clear: false, lock: false, toast: "Nothing new to send", isError: false };
     }
 
     if (sentToInbox === true) {
-      return { clear: true, toast: "Sent " + count + " items ✓", isError: false };
+      return { clear: false, lock: true, toast: "Sent " + count + " items · AI is working…", isError: false };
+    }
+
+    if (inFlight > 0) {
+      return { clear: false, lock: false, toast: "Already sent — the AI is working on these", isError: false };
     }
 
     if (archivedNew === 0) {
-      return { clear: false, toast: "Already archived — the AI did not receive this. Use Copy All.", isError: true };
+      return { clear: false, lock: false, toast: "Already archived — the AI did not receive this. Use Copy All.", isError: true };
     }
 
     return {
       clear: false,
+      lock: false,
       toast: "Archived " + count + " locally — the AI did not receive this. Use Copy All.",
       isError: true,
     };
@@ -1376,7 +1382,7 @@
         });
       });
     }).then(function () {
-      var outcome = flushOutcome({ sentToInbox: sentToInbox, archivedNew: toArchive.length, count: items.length });
+      var outcome = flushOutcome({ sentToInbox: sentToInbox, archivedNew: toArchive.length, count: items.length, inFlight: items.length - toSend.length });
       if (outcome.clear) {
         var flushed = snapshot.filter(function (entry) { return entry.ann.revision === entry.revision && anns.indexOf(entry.ann) !== -1; });
         flushed.forEach(function (entry) { releaseAnchor(entry.ann); if (entry.ann.boxEl) entry.ann.boxEl.remove(); });
