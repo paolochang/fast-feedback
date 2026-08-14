@@ -735,7 +735,10 @@
   // bounded reconciliation is its only terminal: retry the withdrawal once
   // after the claim TTL — a died agent's claim will have been recovered to
   // the spool by then and can confirm — and release the row either way.
-  var UNTRACKED_WITHDRAW_RETRY_MS = 90 * 1000;
+  // The retry must outlast the server's configured claim TTL (injected by the
+  // boot script), or it would run before an abandoned claim can be recovered
+  // and release the row while the stale claim later resurfaces beside a resend.
+  var UNTRACKED_WITHDRAW_RETRY_MS = (typeof window.__FFB_CLAIM_TTL_MS === "number" && isFinite(window.__FFB_CLAIM_TTL_MS) && window.__FFB_CLAIM_TTL_MS >= 0 ? window.__FFB_CLAIM_TTL_MS : 60 * 1000) + 30 * 1000;
   // retire=false frees the row for re-send (a superseded edit); retire=true
   // removes it (a deletion) — untracked claims have no record that could ever
   // settle, so both intents share this bounded reconciliation.

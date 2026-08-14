@@ -75,7 +75,10 @@ const progressFns = "window.__FFB_PROGRESS=function(ids){var parts=[];for(var i=
 export function renderBoot({ fileLabel }) {
   const overlay = readFileSync(overlayPath, "utf8");
   const engine = (h2c + "\n" + overlay).replace(/<\/script/gi, "<\\/script");
-  return "\n<script>window.__FFB_FILE=" + JSON.stringify(fileLabel) + ";" + bootAssignments() + saveFn + saveShotFn + sendFn + archiveFn + historyReadFns + progressFns + "</script>\n" +
+  // The overlay's untracked-release retry must not fire before the server's
+  // abandoned-claim recovery can run, so it needs the configured TTL.
+  const claimTtl = process.env.FFB_CLAIM_TTL_MS === undefined ? 60000 : Number(process.env.FFB_CLAIM_TTL_MS);
+  return "\n<script>window.__FFB_FILE=" + JSON.stringify(fileLabel) + ";window.__FFB_CLAIM_TTL_MS=" + JSON.stringify(claimTtl) + ";" + bootAssignments() + saveFn + saveShotFn + sendFn + archiveFn + historyReadFns + progressFns + "</script>\n" +
     "<script>\n" + engine + "\n</script>\n";
 }
 

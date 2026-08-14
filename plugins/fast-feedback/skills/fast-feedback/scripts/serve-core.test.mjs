@@ -431,6 +431,19 @@ test("renderBoot's progress helpers chunk oversized id batches and merge replies
   });
 });
 
+test("renderBoot injects the configured claim TTL for the overlay's retry pacing", { concurrency: false }, async () => {
+  const previous = process.env.FFB_CLAIM_TTL_MS;
+  try {
+    delete process.env.FFB_CLAIM_TTL_MS;
+    assert.equal(bootHelpers(async () => ({})).__FFB_CLAIM_TTL_MS, 60000);
+    process.env.FFB_CLAIM_TTL_MS = "120000";
+    assert.equal(bootHelpers(async () => ({})).__FFB_CLAIM_TTL_MS, 120000);
+  } finally {
+    if (previous === undefined) delete process.env.FFB_CLAIM_TTL_MS;
+    else process.env.FFB_CLAIM_TTL_MS = previous;
+  }
+});
+
 test("renderBoot's send helper resolves to the parsed send reply", async () => {
   const reply = { ok: true, count: 1, progress: true, items: [{ item_id: "a", progress_id: "b" }] };
   const helpers = bootHelpers(async () => ({ ok: true, json: async () => reply }));
