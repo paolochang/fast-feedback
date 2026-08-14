@@ -6,10 +6,6 @@ import { inboxPath, withLock } from "./inbox.mjs";
 export const QUEUED_STALL_MS = 30 * 60 * 1000;
 export const PROCESSING_STALL_MS = 10 * 60 * 1000;
 export const PROGRESS_GC_MS = 24 * 60 * 60 * 1000;
-// A terminal record nobody has read yet must outlive any hidden tab that
-// still needs to observe it; only after this longer leash may the sweep
-// assume no client is coming back for it.
-export const PROGRESS_UNOBSERVED_GC_MS = 7 * PROGRESS_GC_MS;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TERMINAL_STATUSES = new Set(["completed", "failed"]);
@@ -108,10 +104,12 @@ export async function createQueued(entries, { now = Date.now } = {}) {
   return withLock(dir, async () => {
     // Settled records stop being read once their batch leaves the overlay
     // (withdraw must not delete them — see the Cancel race in serve-core), so
-    // each new send sweeps terminal files. The inbox is shared between tabs:
-    // a record is collectable on the normal window only after some client
-    // observed it (readStatuses stamps observed_at); an unobserved one gets
-    // the long leash so a hidden tab can still settle it on return.
+    // each new send sweeps terminal files. The inbox is shared between tabs,
+    // and only an acknowledged record (readStatuses stamped observed_at on a
+    // client-facing read) is collectable, one window after that observation.
+    // A completion no client has observed survives indefinitely: any fixed
+    // expiry would reopen the duplicate-send hole for a tab that stays
+    // hidden longer than the leash.
     // The whole sweep is best-effort: no hiccup in it — listing, reading, or
     // deleting — may fail the send into untracked mode.
     try {
@@ -122,11 +120,9 @@ export async function createQueued(entries, { now = Date.now } = {}) {
         const swept = await readRecord(join(dir, name), id);
         if (!swept || !TERMINAL_STATUSES.has(swept.status)) continue;
         const observedMs = Date.parse(swept.observed_at);
-        const expired = Number.isFinite(observedMs)
-          ? nowMs - observedMs > PROGRESS_GC_MS
-          : nowMs - newestTimestamp(swept) > PROGRESS_UNOBSERVED_GC_MS;
+        if (!Number.isFinite(observedMs) || nowMs - observedMs <= PROGRESS_GC_MS) continue;
         // One stubborn file must not abort the rest of the sweep.
-        if (expired) { try { await rm(join(dir, name), { force: true }); } catch {} }
+        try { await rm(join(dir, name), { force: true }); } catch {}
       }
     } catch {}
     const created = [];
@@ -190,13 +186,6 @@ export async function markProcessing(ids, options = {}) {
 export async function markSettled(ids, status, options = {}) {
   if (!TERMINAL_STATUSES.has(status)) throw new TypeError("status must be completed or failed");
   return transition(ids, ["queued", "processing"], status, "settled_at", options);
-}
-
-function newestTimestamp(record) {
-  return Math.max(...[record.sent_at, record.claimed_at, record.settled_at]
-    .filter(Boolean)
-    .map((value) => Date.parse(value))
-    .filter(Number.isFinite));
 }
 
 function displayedStatus(record, nowMs) {

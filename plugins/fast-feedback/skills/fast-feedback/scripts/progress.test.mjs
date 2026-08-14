@@ -94,7 +94,7 @@ test("createQueued rolls back the batch when a later record cannot be written", 
   });
 });
 
-test("createQueued sweeps observed terminal records on the window and unobserved ones on the long leash", async () => {
+test("createQueued sweeps only acknowledged terminal records", async () => {
   await withProgress(async (dir) => {
     const fresh = "ffffffff-ffff-4fff-8fff-ffffffffffff";
     const unobserved = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
@@ -102,14 +102,13 @@ test("createQueued sweeps observed terminal records on the window and unobserved
     await markProcessing([SECOND, unobserved], { now: () => 2000 });
     await markSettled([SECOND, unobserved], "completed", { now: () => 3000 });
     await readStatuses([SECOND], { now: () => 4000, acknowledge: true });   // acknowledgement starts SECOND's sweep clock
-    const afterWindow = 4000 + 24 * 60 * 60 * 1000 + 1;
-    await createQueued([queued(fresh, new Date(afterWindow).toISOString())], { now: () => afterWindow });
-    // Queued FIRST always survives; observed SECOND is collected; the record
-    // no tab has read yet is kept for a hidden tab that may still return.
+    // Even far beyond any window, the record no client has observed survives:
+    // a fixed expiry would reopen the duplicate-send hole for a tab that
+    // stays hidden longer. Queued FIRST always survives; observed SECOND is
+    // collected one window after its acknowledgement.
+    const later = 4000 + 30 * 24 * 60 * 60 * 1000;
+    await createQueued([queued(fresh, new Date(later).toISOString())], { now: () => later });
     assert.deepEqual((await readdir(join(dir, "progress"))).sort(), [FIRST + ".json", unobserved + ".json", fresh + ".json"].sort());
-    const afterLeash = 3000 + 7 * 24 * 60 * 60 * 1000 + 1;
-    await createQueued([], { now: () => afterLeash });
-    assert.deepEqual((await readdir(join(dir, "progress"))).sort(), [FIRST + ".json", fresh + ".json"].sort());
   });
 });
 
