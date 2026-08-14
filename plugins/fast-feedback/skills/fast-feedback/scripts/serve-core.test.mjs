@@ -234,7 +234,9 @@ test("handleFfbRoute withdraws queued spool items but keeps processing records",
     const response = await request({ port: server.address().port, path: "/__ffb__/withdraw?overlay=1", headers: authorizedHeaders(server.address().port), body: JSON.stringify({ ids: [queued, processing, completed], item_ids: [untrackedItem, claimedItem] }) });
     assert.equal(response.status, 200);
     assert.deepEqual(removedItemIds, ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", untrackedItem, claimedItem]);
-    assert.deepEqual(deletedIds, [queued, completed]);
+    // Only the confirmed-withdrawn record may be deleted: the completed one
+    // must survive so a Cancel that races a completion cannot orphan it.
+    assert.deepEqual(deletedIds, [queued]);
     assert.deepEqual(JSON.parse(response.body), {
       withdrawn: [queued],
       already_delivered: [processing, completed],

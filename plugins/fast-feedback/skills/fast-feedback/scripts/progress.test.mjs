@@ -55,7 +55,7 @@ test("transitions are monotonic and terminal records are never reopened", async 
     assert.deepEqual(await markSettled([FIRST], "completed", { now: () => Date.parse("2026-08-01T12:03:00.000Z") }), { updated: [FIRST], unknown: [] });
     await markProcessing([FIRST], { now: () => Date.parse("2026-08-01T12:04:00.000Z") });
     await markSettled([FIRST], "failed", { now: () => Date.parse("2026-08-01T12:05:00.000Z") });
-    await createQueued([queued()]);
+    await createQueued([queued()], { now: () => Date.parse("2026-08-01T12:06:00.000Z") });
     const record = (await readStatuses([FIRST], { now: () => Date.parse("2026-08-01T12:06:00.000Z") }))[0];
     assert.equal(record.status, "completed");
     assert.equal(record.settled_at, "2026-08-01T12:03:00.000Z");
@@ -80,6 +80,20 @@ test("readStatuses derives stalled deadlines without persisting stalled", async 
     assert.equal((await readStatuses([SECOND], { now: () => 2001 + PROCESSING_STALL_MS }))[0].status, "stalled");
     assert.equal(JSON.parse(await readFile(join(dir, "progress", FIRST + ".json"), "utf8")).status, "queued");
     assert.equal(JSON.parse(await readFile(join(dir, "progress", SECOND + ".json"), "utf8")).status, "processing");
+  });
+});
+
+test("createQueued sweeps expired terminal records but keeps active ones", async () => {
+  await withProgress(async (dir) => {
+    const fresh = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    await createQueued([queued(FIRST, new Date(1000).toISOString()), queued(SECOND, new Date(1000).toISOString())]);
+    await markProcessing([SECOND], { now: () => 2000 });
+    await markSettled([SECOND], "completed", { now: () => 3000 });
+    const later = 3001 + 24 * 60 * 60 * 1000;
+    await createQueued([queued(fresh, new Date(later).toISOString())], { now: () => later });
+    // The queued record survives (its item can still be pending or in flight);
+    // the expired completed record is collected on the next send.
+    assert.deepEqual((await readdir(join(dir, "progress"))).sort(), [FIRST + ".json", fresh + ".json"]);
   });
 });
 

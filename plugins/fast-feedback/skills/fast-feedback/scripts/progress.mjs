@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { inboxPath, withLock } from "./inbox.mjs";
 
@@ -85,7 +85,7 @@ function isoNow(now) {
   return new Date(milliseconds).toISOString();
 }
 
-export async function createQueued(entries) {
+export async function createQueued(entries, { now = Date.now } = {}) {
   if (!Array.isArray(entries)) throw new TypeError("entries must be an array");
   const records = entries.map((entry) => {
     requireUuid(entry?.progress_id);
@@ -100,7 +100,20 @@ export async function createQueued(entries) {
     };
   });
   const dir = await ensureProgressDir();
+  const nowMs = now();
   return withLock(dir, async () => {
+    // Settled records stop being read once their batch leaves the overlay
+    // (withdraw must not delete them — see the Cancel race in serve-core), so
+    // each new send sweeps terminal files that have outlived the GC window.
+    for (const name of await readdir(dir)) {
+      if (!name.endsWith(".json")) continue;
+      const id = name.slice(0, -".json".length);
+      if (!UUID_PATTERN.test(id)) continue;
+      const swept = await readRecord(join(dir, name), id);
+      if (swept && TERMINAL_STATUSES.has(swept.status) && nowMs - newestTimestamp(swept) > PROGRESS_GC_MS) {
+        await rm(join(dir, name), { force: true });
+      }
+    }
     const created = [];
     for (const record of records) {
       const path = join(dir, record.progress_id + ".json");

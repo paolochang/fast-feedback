@@ -127,6 +127,9 @@ test("send lock and edit save respect in-flight revisions", () => {
   // the edit form must refuse to mutate an annotation the lock already claimed.
   assert.match(overlay, /if \(entry\.ann\.revision !== entry\.revision\) return;/);
   assert.match(overlay, /if \(isHeld\(a\)\) \{ showToast\("The AI is working on this — wait for it to settle", true\); return; \}/);
+  // Settlement removes a row only for the delivered revision, never from
+  // under an open editor.
+  assert.match(overlay, /a\.state === "completed" && a\.revision === a\.progressRevision && editingN !== a\.n/);
 });
 
 test("mid-edit renders keep the draft and cancel settles completed siblings", () => {

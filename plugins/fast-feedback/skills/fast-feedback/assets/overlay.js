@@ -654,7 +654,7 @@
   function submitForm() {
     if (!draft) { form.classList.remove("open"); return; }
     var n = ++counter;
-    var ann = { id: crypto.randomUUID(), n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), sentToInbox: false, revision: 0, archivedRevision: -1, state: null, progressId: null, untracked: false, boxEl: draft.boxEl, anchor: draft.anchor };
+    var ann = { id: crypto.randomUUID(), n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), sentToInbox: false, revision: 0, archivedRevision: -1, state: null, progressId: null, progressRevision: null, untracked: false, boxEl: draft.boxEl, anchor: draft.anchor };
     decorateBox(ann);
     anns.push(ann);
     draft = null;
@@ -1392,15 +1392,17 @@
   }
 
   function settleProgress(total) {
-    var completed = anns.filter(function (a) { return a.progressId && a.state === "completed"; });
-    // Only clean up records with a terminal outcome. A stalled item stays
-    // pending in the inbox (withdrawing it would cancel feedback the AI may
-    // yet pick up), and its record must survive for a late ffb_complete.
-    var ids = anns.filter(function (a) { return a.progressId && (a.state === "completed" || a.state === "failed"); }).map(function (a) { return a.progressId; });
+    // A completion settles only the revision that was delivered, and only when
+    // no editor holds an unsaved draft on the row it would remove.
+    var completed = anns.filter(function (a) { return a.progressId && a.state === "completed" && a.revision === a.progressRevision && editingN !== a.n; });
     completed.forEach(function (a) { releaseAnchor(a); if (a.boxEl) a.boxEl.remove(); });
     anns = anns.filter(function (a) { return completed.indexOf(a) === -1; });
-    anns.forEach(function (a) { if (!isLocked(a) && a.state !== "stalled") { a.progressId = null; a.untracked = false; a.sentToInbox = false; } });
-    if (ids.length && typeof window.__FFB_WITHDRAW === "function") { try { Promise.resolve(window.__FFB_WITHDRAW(ids)).catch(function () {}); } catch (e) {} }
+    anns.forEach(function (a) { if (!isLocked(a) && a.state !== "stalled" && a.state !== "completed") { a.progressId = null; a.progressRevision = null; a.untracked = false; a.sentToInbox = false; } });
+    // A completion that survived removal settled a superseded revision (the
+    // item stalled and was edited) or a row with an open editor. Release only
+    // its tracking; sentToInbox stays honest — false for an edited revision
+    // that still needs delivery, true for an applied one left visible mid-edit.
+    anns.forEach(function (a) { if (a.state === "completed") { a.state = null; a.progressId = null; a.progressRevision = null; a.untracked = false; } });
     if (completed.length === total) { setListTab("history"); refreshHistoryCount(); showToast("All " + total + " items applied ✓", false); }
     else renderList();
   }
@@ -1441,7 +1443,7 @@
       batch.forEach(function (a) {
         if (a.progressId ? withdrawnIds.indexOf(a.progressId) === -1 : withdrawnItems.indexOf(a.id) === -1) return;
         cancelled++;
-        a.state = null; a.progressId = null; a.untracked = false; a.sentToInbox = false;
+        a.state = null; a.progressId = null; a.progressRevision = null; a.untracked = false; a.sentToInbox = false;
       });
       progressFailures = 0;
       // Cancelling the last active item must not strand completed siblings:
@@ -1543,6 +1545,7 @@
             var matches = reply && reply.progress !== false && reply.items ? reply.items.filter(function (item) { return item.item_id === entry.id; }) : [];
             entry.ann.state = "queued";
             entry.ann.progressId = matches.length ? matches[0].progress_id : null;
+            entry.ann.progressRevision = entry.revision;
             entry.ann.untracked = !entry.ann.progressId;
           });
         }

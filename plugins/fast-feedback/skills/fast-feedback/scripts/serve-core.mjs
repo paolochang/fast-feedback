@@ -305,11 +305,13 @@ export function handleFfbRoute(creq, cres, { port, mode = "static", id, inboxApi
         const removedItemIds = new Set(targets.length ? await inboxApi.removePending(targets) : []);
         const withdrawn = queued.filter((record) => removedItemIds.has(record.item_id)).map((record) => record.progress_id);
         const withdrawnSet = new Set(withdrawn);
-        // Delete only records that are done with: cancelled deliveries and
-        // terminal outcomes. A processing record must survive so a late
-        // ffb_complete can still settle the delivery it belongs to.
-        const disposable = withdrawn.concat(records.filter((record) => record.status === "completed" || record.status === "failed").map((record) => record.progress_id));
-        if (disposable.length) await progressApi.withdraw(disposable);
+        // Delete only records confirmed withdrawn. Everything else must
+        // survive: a processing record for its late ffb_complete, and a
+        // completed record for the Cancel race — the overlay may not have
+        // observed the completion yet, and deleting it here would make the
+        // next poll read "unknown" and unlock already-applied feedback for a
+        // duplicate send. Expired terminal records are swept by createQueued.
+        if (withdrawn.length) await progressApi.withdraw(withdrawn);
         sendJson(cres, 200, {
           withdrawn,
           already_delivered: ids.filter((progressId) => !withdrawnSet.has(progressId)),
