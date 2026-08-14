@@ -312,6 +312,10 @@ export async function removePending(itemIds) {
     // Give an expired claim its recovery first, so cancellation reaches it —
     // an unexpired claim legitimately belongs to the delivery that took it.
     await recoverAbandonedClaims(pendingDir);
+    // Per-item best-effort throughout: reporting is the contract here — only
+    // a proven removal may appear in the result, and one failing entry must
+    // not discard the knowledge of what was already removed. Unproven items
+    // simply stay out of the result, so callers keep their records.
     const requested = new Set(itemIds.filter(isUuid));
     const removed = new Set();
     for (const itemId of requested) {
@@ -321,27 +325,31 @@ export async function removePending(itemIds) {
       } catch (error) {
         // A claim rename makes the pending filename disappear. That is a normal
         // lost cancellation race: delivery owns the item from that point on.
-        if (error?.code !== "ENOENT") throw error;
+        if (error?.code !== "ENOENT") console.error(error);
       }
     }
     // A recovered abandoned claim lives under a random filename — and can
     // coexist with a canonical resend of the same annotation. Scan every
     // remaining pending payload for the requested ids so no stale revision
     // survives a cancellation; each id is reported once.
-    for (const name of (await readdir(pendingDir)).filter((entry) => entry.endsWith(".json"))) {
-      let payloadId;
-      try {
-        payloadId = JSON.parse(await readFile(join(pendingDir, name), "utf8"))?.id;
-      } catch {
-        continue;
+    try {
+      for (const name of (await readdir(pendingDir)).filter((entry) => entry.endsWith(".json"))) {
+        let payloadId;
+        try {
+          payloadId = JSON.parse(await readFile(join(pendingDir, name), "utf8"))?.id;
+        } catch {
+          continue;
+        }
+        if (!requested.has(payloadId)) continue;
+        try {
+          await rm(join(pendingDir, name));
+          removed.add(payloadId);
+        } catch (error) {
+          if (error?.code !== "ENOENT") console.error(error);
+        }
       }
-      if (!requested.has(payloadId)) continue;
-      try {
-        await rm(join(pendingDir, name));
-        removed.add(payloadId);
-      } catch (error) {
-        if (error?.code !== "ENOENT") throw error;
-      }
+    } catch (error) {
+      console.error(error);
     }
     try {
       await writeMirrors(dir, pendingDir);

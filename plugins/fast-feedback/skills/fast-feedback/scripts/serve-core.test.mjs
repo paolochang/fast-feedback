@@ -257,6 +257,37 @@ test("handleFfbRoute returns partial tracking for deliveries that escape rollbac
   } finally { await new Promise((resolve) => server.close(resolve)); }
 });
 
+test("handleFfbRoute returns tracking for published items when removal cannot prove anything", async () => {
+  const publishedItem = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  let queuedEntries;
+  let withdrawCalled = false;
+  const server = await startServer("test-session", {
+    progressApi: {
+      createQueued: async (entries) => { queuedEntries = entries; },
+      withdraw: async () => { withdrawCalled = true; },
+    },
+    inboxApi: {
+      appendItems: async () => {
+        const failure = new Error("disk full");
+        failure.published = [publishedItem];
+        throw failure;
+      },
+      removePending: async () => { throw new Error("spool unreadable"); },
+      count: async () => 1,
+    },
+  });
+  try {
+    const response = await request({ port: server.address().port, headers: authorizedHeaders(server.address().port), body: JSON.stringify([{ id: publishedItem }]) });
+    // Nothing is proven withdrawn, so the published delivery must come back
+    // as partial tracking rather than a blind 500 that invites a duplicate.
+    assert.equal(response.status, 200);
+    const result = JSON.parse(response.body);
+    assert.equal(result.partial, true);
+    assert.deepEqual(result.items, [{ item_id: publishedItem, progress_id: queuedEntries[0].progress_id }]);
+    assert.equal(withdrawCalled, false);
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+});
+
 test("handleFfbRoute reports success with a null count when counting fails after publication", async () => {
   const server = await startServer("test-session", {
     progressApi: { createQueued: async () => {} },

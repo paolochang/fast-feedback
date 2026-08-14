@@ -267,6 +267,26 @@ test("removePending withdraws an expired claim instead of reporting it delivered
   });
 });
 
+test("removePending reports proven removals even when another entry cannot be removed", async () => {
+  await withInbox(async (dir) => {
+    const stuck = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const fine = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const errors = [];
+    const originalError = console.error;
+    console.error = (error) => errors.push(error);
+    try {
+      await appendItems([{ id: fine, comment: "removable" }]);
+      // A directory squatting on the stuck item's path makes its rm fail with
+      // a non-ENOENT error; the proven removal must still be reported.
+      await mkdir(join(dir, "pending", stuck + ".json"));
+      assert.deepEqual(await removePending([stuck, fine]), [fine]);
+      assert.ok(errors.length >= 1);
+    } finally {
+      console.error = originalError;
+    }
+  });
+});
+
 test("removePending clears recovered duplicates alongside a canonical resend", async () => {
   await withInbox(async (dir) => {
     const itemId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";

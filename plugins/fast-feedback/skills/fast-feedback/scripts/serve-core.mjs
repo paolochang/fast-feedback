@@ -248,28 +248,33 @@ export function handleFfbRoute(creq, cres, { port, mode = "static", id, inboxApi
           // delivered, so hand its tracking back as a partial success instead
           // of a blind 500 that would leave it retryable as a duplicate.
           const published = Array.isArray(error?.published) ? new Set(error.published) : null;
+          // If the removal itself fails, nothing is proven withdrawn: an
+          // empty set keeps every published delivery in the escaped list, so
+          // the overlay still receives tracking for work that may be live
+          // instead of retrying it blind.
+          let removed = new Set();
           try {
-            const removed = new Set(await inboxApi.removePending(deliveries.map((item) => item.id).filter(Boolean)));
+            removed = new Set(await inboxApi.removePending(deliveries.map((item) => item.id).filter(Boolean)));
             if (tracked) {
               const orphaned = deliveries
                 .filter((item) => removed.has(item.id) || (published && item.id && !published.has(item.id)))
                 .map((item) => item.progress_id);
               if (orphaned.length) { try { await progressApi.withdraw(orphaned); } catch {} }
             }
-            const escaped = published ? deliveries.filter((item) => published.has(item.id) && !removed.has(item.id)) : [];
-            if (escaped.length) {
-              let count = null;
-              try { count = await inboxApi.count(); } catch {}
-              sendJson(cres, 200, {
-                ok: false,
-                partial: true,
-                count,
-                progress: tracked,
-                items: escaped.map((item) => ({ item_id: item.id, progress_id: item.progress_id })),
-              });
-              return;
-            }
           } catch {}
+          const escaped = published ? deliveries.filter((item) => published.has(item.id) && !removed.has(item.id)) : [];
+          if (escaped.length) {
+            let count = null;
+            try { count = await inboxApi.count(); } catch {}
+            sendJson(cres, 200, {
+              ok: false,
+              partial: true,
+              count,
+              progress: tracked,
+              items: escaped.map((item) => ({ item_id: item.id, progress_id: item.progress_id })),
+            });
+            return;
+          }
           throw error;
         }
         // The batch is published and tracked; a count hiccup afterwards must
