@@ -716,12 +716,36 @@
         ? (reply && reply.withdrawn || []).indexOf(progressId) !== -1
         : (reply && reply.withdrawn_items || []).indexOf(a.id) !== -1;
       if (confirmed && a.progressId === progressId) { a.state = null; a.progressId = null; a.progressRevision = null; a.untracked = false; }
-      else if (!confirmed) showToast("The AI already took the previous version — the edit sends after it settles", false);
+      else if (!confirmed) {
+        // A tracked claimed delivery settles via its record; an untracked one
+        // never can, so it gets the bounded reconciliation instead.
+        if (progressId) showToast("The AI already took the previous version — the edit sends after it settles", false);
+        else scheduleUntrackedRelease(a);
+      }
       renderList();
       // The watch loop may have died while this row was excluded from it;
       // restart it so an unconfirmed delivery's completion is still observed.
       scheduleProgress();
-    }).catch(function () { a.withdrawing = false; renderList(); scheduleProgress(); });
+    }).catch(function () { a.withdrawing = false; renderList(); scheduleProgress(); if (!progressId) scheduleUntrackedRelease(a); });
+  }
+  // A claimed untracked delivery has no record that could ever settle, so a
+  // bounded reconciliation is its only terminal: retry the withdrawal once
+  // after the claim TTL — a died agent's claim will have been recovered to
+  // the spool by then and can confirm — and release the row either way.
+  var UNTRACKED_WITHDRAW_RETRY_MS = 90 * 1000;
+  function scheduleUntrackedRelease(a) {
+    setTimeout(function () {
+      if (anns.indexOf(a) === -1 || !a.untracked || a.sentToInbox) return;
+      var release = function (confirmed) {
+        if (!confirmed) showToast("The previous version was already taken — re-sending may duplicate it", false);
+        a.untracked = false; a.state = null;
+        renderList();
+      };
+      if (typeof window.__FFB_WITHDRAW !== "function") { release(true); return; }
+      Promise.resolve(window.__FFB_WITHDRAW([], [a.id])).then(function (reply) {
+        release((reply && reply.withdrawn_items || []).indexOf(a.id) !== -1);
+      }).catch(function () { release(false); });
+    }, UNTRACKED_WITHDRAW_RETRY_MS);
   }
   function deleteAnn(a) {
     // Recheck the hold here, not only in the render: a send reply can lock

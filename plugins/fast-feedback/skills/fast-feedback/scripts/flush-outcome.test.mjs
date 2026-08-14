@@ -175,6 +175,7 @@ test("progress scheduling requires a tracked annotation and tracking includes st
   // An edited stalled row withdraws its outstanding delivery, and rows still
   // carrying a progressId never enter a new send.
   assert.match(overlay, /function withdrawSuperseded\(a\) \{/);
+  assert.match(overlay, /function scheduleUntrackedRelease\(a\) \{/);
   assert.match(overlay, /var toSend = snapshot\.filter\(function \(entry\) \{ return !entry\.ann\.sentToInbox && !entry\.ann\.progressId && !entry\.ann\.untracked; \}\);/);
 });
 
