@@ -306,39 +306,35 @@ export async function removePending(itemIds) {
     // Give an expired claim its recovery first, so cancellation reaches it —
     // an unexpired claim legitimately belongs to the delivery that took it.
     await recoverAbandonedClaims(pendingDir);
-    const wanted = new Set(itemIds.filter(isUuid));
-    const removed = [];
-    for (const itemId of [...wanted]) {
+    const requested = new Set(itemIds.filter(isUuid));
+    const removed = new Set();
+    for (const itemId of requested) {
       try {
         await rm(join(pendingDir, itemId + ".json"));
-        removed.push(itemId);
-        wanted.delete(itemId);
+        removed.add(itemId);
       } catch (error) {
         // A claim rename makes the pending filename disappear. That is a normal
         // lost cancellation race: delivery owns the item from that point on.
         if (error?.code !== "ENOENT") throw error;
       }
     }
-    // A recovered abandoned claim lives under a random filename; its payload
-    // still carries the item id, so locate the stragglers by content rather
-    // than reporting a still-pending item as delivered.
-    if (wanted.size) {
-      for (const name of (await readdir(pendingDir)).filter((entry) => entry.endsWith(".json"))) {
-        if (!wanted.size) break;
-        let payloadId;
-        try {
-          payloadId = JSON.parse(await readFile(join(pendingDir, name), "utf8"))?.id;
-        } catch {
-          continue;
-        }
-        if (!wanted.has(payloadId)) continue;
-        try {
-          await rm(join(pendingDir, name));
-          removed.push(payloadId);
-          wanted.delete(payloadId);
-        } catch (error) {
-          if (error?.code !== "ENOENT") throw error;
-        }
+    // A recovered abandoned claim lives under a random filename — and can
+    // coexist with a canonical resend of the same annotation. Scan every
+    // remaining pending payload for the requested ids so no stale revision
+    // survives a cancellation; each id is reported once.
+    for (const name of (await readdir(pendingDir)).filter((entry) => entry.endsWith(".json"))) {
+      let payloadId;
+      try {
+        payloadId = JSON.parse(await readFile(join(pendingDir, name), "utf8"))?.id;
+      } catch {
+        continue;
+      }
+      if (!requested.has(payloadId)) continue;
+      try {
+        await rm(join(pendingDir, name));
+        removed.add(payloadId);
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
       }
     }
     try {
@@ -348,7 +344,7 @@ export async function removePending(itemIds) {
       // already completed cancellation into a reported failure.
       console.error(error);
     }
-    return removed;
+    return [...removed];
   });
 }
 

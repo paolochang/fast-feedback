@@ -262,6 +262,20 @@ test("removePending withdraws an expired claim instead of reporting it delivered
   });
 });
 
+test("removePending clears recovered duplicates alongside a canonical resend", async () => {
+  await withInbox(async (dir) => {
+    const itemId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    await appendItems([{ id: itemId, comment: "old revision" }]);
+    // A recovered abandoned claim keeps the old revision under a random
+    // filename while a resend recreates the canonical one.
+    await rename(join(dir, "pending", itemId + ".json"), join(dir, "pending", "cccccccc-cccc-4ccc-8ccc-cccccccccccc.json"));
+    await appendItems([{ id: itemId, comment: "new revision" }]);
+    assert.equal(await count(), 2);
+    assert.deepEqual(await removePending([itemId]), [itemId]);
+    assert.equal(await count(), 0);
+  });
+});
+
 test("readAndClear reports delivered items to its hook while peek does not", async () => {
   await withInbox(async () => {
     const progressId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
