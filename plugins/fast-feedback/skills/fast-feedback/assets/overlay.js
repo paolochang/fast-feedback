@@ -654,7 +654,7 @@
   function submitForm() {
     if (!draft) { form.classList.remove("open"); return; }
     var n = ++counter;
-    var ann = { id: crypto.randomUUID(), n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), sentToInbox: false, revision: 0, archivedRevision: -1, state: null, progressId: null, progressRevision: null, untracked: false, lockedAt: null, withdrawing: false, boxEl: draft.boxEl, anchor: draft.anchor };
+    var ann = { id: crypto.randomUUID(), n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), sentToInbox: false, revision: 0, archivedRevision: -1, state: null, progressId: null, progressRevision: null, untracked: false, lockedAt: null, withdrawing: false, untrackedRetryTimer: null, boxEl: draft.boxEl, anchor: draft.anchor };
     decorateBox(ann);
     anns.push(ann);
     draft = null;
@@ -734,9 +734,17 @@
   // the spool by then and can confirm — and release the row either way.
   var UNTRACKED_WITHDRAW_RETRY_MS = 90 * 1000;
   function scheduleUntrackedRelease(a) {
-    setTimeout(function () {
+    // One retry per row: a newer edit supersedes any pending one, so no stale
+    // request can outlive a release and withdraw the row's next delivery.
+    if (a.untrackedRetryTimer) clearTimeout(a.untrackedRetryTimer);
+    a.untrackedRetryTimer = setTimeout(function () {
+      a.untrackedRetryTimer = null;
       if (anns.indexOf(a) === -1 || !a.untracked || a.sentToInbox) return;
+      var revision = a.revision;
       var release = function (confirmed) {
+        // Re-validate at reply time: the row must still be the same unsent
+        // untracked revision this retry was dispatched for.
+        if (anns.indexOf(a) === -1 || !a.untracked || a.sentToInbox || a.revision !== revision) return;
         if (!confirmed) showToast("The previous version was already taken — re-sending may duplicate it", false);
         a.untracked = false; a.state = null;
         renderList();
