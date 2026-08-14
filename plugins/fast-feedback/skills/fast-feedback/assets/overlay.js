@@ -1588,12 +1588,19 @@
     }).then(function () { progressReading = false; scheduleProgress(); });
   }
 
+  var cancelInFlight = false;
   function cancelBatch() {
+    // One cancellation at a time: a second overlapping request could confirm
+    // after the first unlocked and re-sent a row, withdrawing the new spool
+    // entry by its reused item id.
+    if (cancelInFlight) { showToast("Cancelling…", false); return; }
     var batch = anns.filter(function (a) { return isLocked(a); });
     var ids = batch.filter(function (a) { return a.progressId; }).map(function (a) { return a.progressId; });
     var itemIds = batch.filter(function (a) { return !a.progressId; }).map(function (a) { return a.id; });
     if (typeof window.__FFB_WITHDRAW !== "function") return;
+    cancelInFlight = true;
     Promise.resolve(window.__FFB_WITHDRAW(ids, itemIds)).then(function (reply) {
+      cancelInFlight = false;
       // Unlock only what the server confirmed it pulled back — by progress ID
       // for tracked items, by item ID for untracked ones. Anything already
       // claimed stays locked (and, when tracked, polled) so its eventual
@@ -1616,7 +1623,7 @@
       var missed = batch.length - cancelled;
       showToast(cancelled + " withdrawn" + (missed ? " · " + missed + " couldn't be cancelled" : ""), false);
       scheduleProgress();
-    }).catch(function () { showToast("Cancel failed · items kept", true); });
+    }).catch(function () { cancelInFlight = false; showToast("Cancel failed · items kept", true); });
   }
 
   document.addEventListener("visibilitychange", function () {
