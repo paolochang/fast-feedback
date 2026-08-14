@@ -654,7 +654,7 @@
   function submitForm() {
     if (!draft) { form.classList.remove("open"); return; }
     var n = ++counter;
-    var ann = { id: crypto.randomUUID(), n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), sentToInbox: false, revision: 0, archivedRevision: -1, state: null, progressId: null, progressRevision: null, untracked: false, lockedAt: null, boxEl: draft.boxEl, anchor: draft.anchor };
+    var ann = { id: crypto.randomUUID(), n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), sentToInbox: false, revision: 0, archivedRevision: -1, state: null, progressId: null, progressRevision: null, untracked: false, lockedAt: null, withdrawing: false, boxEl: draft.boxEl, anchor: draft.anchor };
     decorateBox(ann);
     anns.push(ann);
     draft = null;
@@ -672,7 +672,7 @@
     box.querySelector(".__ffb_bdel").onclick = function (e) { e.stopPropagation(); if (!isLocked(a)) deleteAnn(a); };
   }
   function isLocked(a) { return a.state === "queued" || a.state === "processing"; }
-  function isHeld(a) { return isLocked(a) || a.state === "completed"; }
+  function isHeld(a) { return isLocked(a) || a.state === "completed" || a.withdrawing === true; }
   // Stalled items unlock but stay polled: their record survives server-side,
   // so a late ffb_complete must still be able to land on the card.
   function isTracked(a) { return !!a.progressId && (isLocked(a) || a.state === "stalled"); }
@@ -706,15 +706,24 @@
     if (hasLiveDelivery(a)) {
       if (typeof window.__FFB_WITHDRAW !== "function") { showToast("No server — can't withdraw this item", true); return; }
       confirmDiscard("Delete annotation [" + a.n + "]? It is still pending for the AI and will be withdrawn. This can't be undone.", function () {
-        Promise.resolve(window.__FFB_WITHDRAW(a.progressId ? [a.progressId] : [], a.progressId ? [] : [a.id])).then(function (reply) {
-          var confirmed = a.progressId
-            ? (reply && reply.withdrawn || []).indexOf(a.progressId) !== -1
+        var progressId = a.progressId, revision = a.revision;
+        // Hold the row while the withdrawal is in flight: an edit + resend
+        // racing the reply would otherwise hand the new delivery a detached
+        // object whose completion nothing renders.
+        a.withdrawing = true;
+        patchProgressChips();
+        Promise.resolve(window.__FFB_WITHDRAW(progressId ? [progressId] : [], progressId ? [] : [a.id])).then(function (reply) {
+          a.withdrawing = false;
+          var confirmed = progressId
+            ? (reply && reply.withdrawn || []).indexOf(progressId) !== -1
             : (reply && reply.withdrawn_items || []).indexOf(a.id) !== -1;
           // Unconfirmed means the AI already took it: keep the row so the
           // eventual completion still lands somewhere visible.
-          if (!confirmed) { showToast("The AI already took this item — it will settle when the AI finishes", false); return; }
+          if (!confirmed) { showToast("The AI already took this item — it will settle when the AI finishes", false); patchProgressChips(); return; }
+          // Remove only the delivery we actually withdrew.
+          if (anns.indexOf(a) === -1 || a.revision !== revision || a.progressId !== progressId) { renderList(); return; }
           removeAnn(a);
-        }).catch(function () { showToast("Couldn't withdraw — item kept", true); });
+        }).catch(function () { a.withdrawing = false; showToast("Couldn't withdraw — item kept", true); patchProgressChips(); });
       }, "Cancel", "Discard");
       return;
     }
