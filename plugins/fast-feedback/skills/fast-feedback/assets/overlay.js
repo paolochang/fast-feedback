@@ -774,6 +774,10 @@
     if (hasLiveDelivery(a)) {
       if (typeof window.__FFB_WITHDRAW !== "function") { showToast("No server — can't withdraw this item", true); return; }
       confirmDiscard("Delete annotation [" + a.n + "]? It is still pending for the AI and will be withdrawn. This can't be undone.", function () {
+        // The row may have been locked — or taken by another withdrawal (the
+        // untracked release retry) — while this dialog was open; starting a
+        // second withdrawal here would overlap it.
+        if (isHeld(a)) { showToast("The AI is working on this", false); renderList(); return; }
         var progressId = a.progressId, revision = a.revision;
         // Hold the row while the withdrawal is in flight: an edit + resend
         // racing the reply would otherwise hand the new delivery a detached
