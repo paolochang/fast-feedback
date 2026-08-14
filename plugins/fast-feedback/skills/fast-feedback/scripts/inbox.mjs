@@ -318,11 +318,12 @@ export async function removePending(itemIds) {
     // simply stay out of the result, so callers keep their records.
     const requested = new Set(itemIds.filter(isUuid));
     const removed = new Set();
-    // An id is reported only when every pending copy of it is proven gone: a
-    // failed deletion or an unreadable entry marks it (or, when the entry's
-    // payload is unknowable, every requested id) unproven, and unproven ids
-    // drop out of the result so callers keep their records and rows.
-    const unproven = new Set();
+    // An id is reported only when every pending copy of it is proven gone.
+    // Failures are tracked per filename so that a copy whose deletion failed
+    // transiently, but which the duplicate scan then removes, clears its own
+    // failure instead of withholding the id forever. A filename whose payload
+    // is unknowable withholds every requested id.
+    const failed = new Map();
     for (const itemId of requested) {
       try {
         await rm(join(pendingDir, itemId + ".json"));
@@ -330,7 +331,7 @@ export async function removePending(itemIds) {
       } catch (error) {
         // A claim rename makes the pending filename disappear. That is a normal
         // lost cancellation race: delivery owns the item from that point on.
-        if (error?.code !== "ENOENT") { console.error(error); unproven.add(itemId); }
+        if (error?.code !== "ENOENT") { console.error(error); failed.set(itemId + ".json", itemId); }
       }
     }
     // A recovered abandoned claim lives under a random filename — and can
@@ -347,7 +348,7 @@ export async function removePending(itemIds) {
           // unreadable content that could duplicate any requested id.
           if (error?.code === "ENOENT" || error?.code === "EISDIR") continue;
           console.error(error);
-          requested.forEach((id) => unproven.add(id));
+          failed.set(name, null);
           continue;
         }
         let payloadId;
@@ -362,15 +363,20 @@ export async function removePending(itemIds) {
         try {
           await rm(join(pendingDir, name));
           removed.add(payloadId);
+          failed.delete(name);
         } catch (error) {
-          if (error?.code !== "ENOENT") { console.error(error); unproven.add(payloadId); }
+          if (error?.code === "ENOENT") failed.delete(name);
+          else { console.error(error); failed.set(name, payloadId); }
         }
       }
     } catch (error) {
       console.error(error);
-      requested.forEach((id) => unproven.add(id));
+      requested.forEach((id) => removed.delete(id));
     }
-    unproven.forEach((id) => removed.delete(id));
+    failed.forEach((payloadId) => {
+      if (payloadId === null) requested.forEach((id) => removed.delete(id));
+      else removed.delete(payloadId);
+    });
     try {
       await writeMirrors(dir, pendingDir);
     } catch (error) {
