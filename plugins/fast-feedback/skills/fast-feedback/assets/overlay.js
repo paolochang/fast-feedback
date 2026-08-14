@@ -897,6 +897,11 @@
   }
 
   function renderLiveList() {
+    // An open editor's unsaved text lives only in its textarea. A send reply,
+    // progress settle, or archive completion can re-render mid-edit; carry the
+    // draft across so the user can still save or explicitly discard it.
+    var draftTa = editingN !== null ? itemsEl.querySelector("textarea") : null;
+    var draft = draftTa ? draftTa.value : null;
     itemsEl.innerHTML = "";
     if (!anns.length) { itemsEl.innerHTML = '<div class="__ffb_empty">No feedback yet.<br>Arm Write and drag a box over the page.</div>'; return; }
     if (progressFailures >= 20 && anns.some(isLocked)) itemsEl.innerHTML = '<div class="__ffb_progresswarn">Can\'t read progress</div>';
@@ -906,7 +911,7 @@
       if (editingN === a.n) {
         item.innerHTML =
           '<div><span class="__ffb_n">[' + a.n + ']</span><span class="__ffb_isel">' + esc(a.sel) + '</span></div>' +
-          '<textarea>' + esc(a.comment) + '</textarea>' +
+          '<textarea>' + esc(draft !== null ? draft : a.comment) + '</textarea>' +
           '<div class="__ffb_iact"><button class="__ffb_btn __ffb_ec">Close</button><button class="__ffb_btn primary __ffb_es">Save</button></div>';
         var ta = item.querySelector("textarea");
         setTimeout(function () { ta.focus(); }, 0);
@@ -1438,7 +1443,13 @@
         cancelled++;
         a.state = null; a.progressId = null; a.untracked = false; a.sentToInbox = false;
       });
-      progressFailures = 0; renderList();
+      progressFailures = 0;
+      // Cancelling the last active item must not strand completed siblings:
+      // with nothing left to poll, settlement would otherwise never run and a
+      // completed annotation would stay held in Live indefinitely.
+      var remaining = anns.filter(function (a) { return !!a.progressId || a.untracked; }).length;
+      if (remaining && !anns.some(isLocked) && anns.some(function (a) { return a.state === "completed"; })) settleProgress(remaining);
+      else renderList();
       var missed = batch.length - cancelled;
       showToast(cancelled + " withdrawn" + (missed ? " · " + missed + " couldn't be cancelled" : ""), false);
       scheduleProgress();
@@ -1524,7 +1535,6 @@
         // first poll read "unknown" and unlock delivered work, so those items
         // stay locked as untracked instead.
         if (progressCapable) {
-          editingN = null;
           toSend.forEach(function (entry) {
             // An edit that landed while the send was in flight bumped the
             // revision: the old delivery's progress must not claim (and later

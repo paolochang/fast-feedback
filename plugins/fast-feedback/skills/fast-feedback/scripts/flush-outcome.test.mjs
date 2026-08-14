@@ -129,6 +129,14 @@ test("send lock and edit save respect in-flight revisions", () => {
   assert.match(overlay, /if \(isHeld\(a\)\) \{ showToast\("The AI is working on this — wait for it to settle", true\); return; \}/);
 });
 
+test("mid-edit renders keep the draft and cancel settles completed siblings", () => {
+  const overlay = readFileSync(new URL("../assets/overlay.js", import.meta.url), "utf8");
+  // The send-reply lock must not close an open editor, and re-renders carry
+  // the unsaved draft; cancelling the last active item re-runs settlement.
+  assert.match(overlay, /var draftTa = editingN !== null \? itemsEl\.querySelector\("textarea"\) : null;/);
+  assert.match(overlay, /if \(remaining && !anns\.some\(isLocked\) && anns\.some\(function \(a\) \{ return a\.state === "completed"; \}\)\) settleProgress\(remaining\);/);
+});
+
 test("console mode does not enable progress UI", () => {
   const overlay = readFileSync(new URL("../assets/overlay.js", import.meta.url), "utf8");
   assert.match(overlay, /var progressCapable = typeof window\.__FFB_PROGRESS === "function";/);
