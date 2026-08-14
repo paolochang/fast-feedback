@@ -740,11 +740,19 @@
     a.untrackedRetryTimer = setTimeout(function () {
       a.untrackedRetryTimer = null;
       if (anns.indexOf(a) === -1 || !a.untracked || a.sentToInbox) return;
+      // An in-flight withdrawal owns the row; come back after it settles.
+      if (a.withdrawing) { scheduleUntrackedRelease(a); return; }
       var revision = a.revision;
+      // Hold the row through the request: Send stays blocked and no newer
+      // retry can start, so this request cannot race a re-send on the server
+      // and withdraw the row's next spool entry by its reused item id.
+      a.withdrawing = true;
+      patchProgressChips();
       var release = function (confirmed) {
+        a.withdrawing = false;
         // Re-validate at reply time: the row must still be the same unsent
         // untracked revision this retry was dispatched for.
-        if (anns.indexOf(a) === -1 || !a.untracked || a.sentToInbox || a.revision !== revision) return;
+        if (anns.indexOf(a) === -1 || !a.untracked || a.sentToInbox || a.revision !== revision) { patchProgressChips(); return; }
         if (!confirmed) showToast("The previous version was already taken — re-sending may duplicate it", false);
         a.untracked = false; a.state = null;
         renderList();
