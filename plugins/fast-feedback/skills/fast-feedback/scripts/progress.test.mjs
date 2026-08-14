@@ -97,20 +97,20 @@ test("createQueued sweeps expired terminal records but keeps active ones", async
   });
 });
 
-test("reads garbage-collect only terminal records older than 24 hours", async () => {
+test("reads keep records past the GC window so late observers still see them", async () => {
   await withProgress(async (dir) => {
     await createQueued([queued(FIRST, new Date(1000).toISOString()), queued(SECOND, new Date(1000).toISOString())]);
     await markProcessing([SECOND], { now: () => 2000 });
     await markSettled([SECOND], "completed", { now: () => 3000 });
     const statuses = await readStatuses([FIRST, SECOND], { now: () => 3001 + 24 * 60 * 60 * 1000 });
-    // The queued record outlives the window (its item can still be pending or
-    // in flight) and reads as stalled; the completed record is collected.
+    // A tab hidden past the window must still observe the completion when it
+    // returns; only createQueued's sweep collects expired terminal records.
     assert.deepEqual(statuses.map(({ progress_id, status }) => ({ progress_id, status })), [
       { progress_id: FIRST, status: "stalled" },
-      { progress_id: SECOND, status: "unknown" },
+      { progress_id: SECOND, status: "completed" },
     ]);
     await stat(join(dir, "progress", FIRST + ".json"));
-    await assert.rejects(stat(join(dir, "progress", SECOND + ".json")), { code: "ENOENT" });
+    await stat(join(dir, "progress", SECOND + ".json"));
   });
 });
 

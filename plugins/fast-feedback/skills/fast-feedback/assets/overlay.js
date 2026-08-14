@@ -654,7 +654,7 @@
   function submitForm() {
     if (!draft) { form.classList.remove("open"); return; }
     var n = ++counter;
-    var ann = { id: crypto.randomUUID(), n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), sentToInbox: false, revision: 0, archivedRevision: -1, state: null, progressId: null, progressRevision: null, untracked: false, boxEl: draft.boxEl, anchor: draft.anchor };
+    var ann = { id: crypto.randomUUID(), n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), sentToInbox: false, revision: 0, archivedRevision: -1, state: null, progressId: null, progressRevision: null, untracked: false, lockedAt: null, boxEl: draft.boxEl, anchor: draft.anchor };
     decorateBox(ann);
     anns.push(ann);
     draft = null;
@@ -676,6 +676,18 @@
   // Stalled items unlock but stay polled: their record survives server-side,
   // so a late ffb_complete must still be able to land on the card.
   function isTracked(a) { return !!a.progressId && (isLocked(a) || a.state === "stalled"); }
+  // Untracked deliveries have no record to poll, but still need the watch
+  // loop: a local deadline stands in for the server's stall detection, giving
+  // a claimed-but-unreportable delivery an exit from its lock.
+  var UNTRACKED_STALL_MS = 30 * 60 * 1000;
+  function watchesProgress(a) { return isTracked(a) || (isLocked(a) && a.untracked); }
+  // A completion retires its row only when it matches the delivered revision,
+  // its archive actually exists, and no editor holds a draft on it.
+  function settleReady(a) { return a.state === "completed" && a.revision === a.progressRevision && a.archivedRevision === a.revision && editingN !== a.n; }
+  function retireCompleted(list) {
+    list.forEach(function (a) { releaseAnchor(a); if (a.boxEl) a.boxEl.remove(); });
+    anns = anns.filter(function (a) { return list.indexOf(a) === -1; });
+  }
   function deleteAnn(a) {
     confirmDiscard("Delete annotation [" + a.n + "]? This can't be undone.", function () {
       releaseAnchor(a);
@@ -919,9 +931,8 @@
           // The AI finished this row while its editor was open — settlement
           // kept it visible so the draft survived. Closing without saving a
           // new revision means the applied annotation is done: remove it now.
-          if (a.state === "completed" && a.revision === a.progressRevision) {
-            releaseAnchor(a); if (a.boxEl) a.boxEl.remove();
-            anns = anns.filter(function (other) { return other !== a; });
+          if (a.state === "completed" && a.revision === a.progressRevision && a.archivedRevision === a.revision) {
+            retireCompleted([a]);
             // If this was the last Live row, finish the batch the same way
             // settleProgress would have: hand the user over to History.
             if (!anns.length) { setListTab("history"); refreshHistoryCount(); showToast("All items applied ✓", false); }
@@ -1382,7 +1393,7 @@
 
   function scheduleProgress() {
     clearTimeout(progressTimer); progressTimer = null;
-    if (!progressCapable || document.hidden || !anns.some(isTracked)) return;
+    if (!progressCapable || document.hidden || !anns.some(watchesProgress)) return;
     progressTimer = setTimeout(readProgress, progressFailures >= 3 ? 5000 : 1500);
   }
 
@@ -1407,17 +1418,15 @@
   }
 
   function settleProgress(total) {
-    // A completion settles only the revision that was delivered, and only when
-    // no editor holds an unsaved draft on the row it would remove.
-    var completed = anns.filter(function (a) { return a.progressId && a.state === "completed" && a.revision === a.progressRevision && editingN !== a.n; });
-    completed.forEach(function (a) { releaseAnchor(a); if (a.boxEl) a.boxEl.remove(); });
-    anns = anns.filter(function (a) { return completed.indexOf(a) === -1; });
+    var completed = anns.filter(function (a) { return a.progressId && settleReady(a); });
+    retireCompleted(completed);
     anns.forEach(function (a) { if (!isLocked(a) && a.state !== "stalled" && a.state !== "completed") { a.progressId = null; a.progressRevision = null; a.untracked = false; a.sentToInbox = false; } });
     // A completion that survived removal either settled a superseded revision
     // (the item stalled and was edited — release everything, the new text
-    // re-sends on the next flush) or sits under an open editor — there the
-    // completed marker must survive so closing the editor can finish the
-    // settlement (see settleClosedEdit); only the polling handle is dropped.
+    // re-sends on the next flush) or was held back by settleReady: an open
+    // editor (settleClosedEdit finishes it) or a missing archive (the next
+    // flush retries the archive and finishes it). The completed marker must
+    // survive for those; only the polling handle is dropped.
     anns.forEach(function (a) {
       if (a.state !== "completed") return;
       if (a.revision !== a.progressRevision) { a.state = null; a.progressRevision = null; }
@@ -1428,6 +1437,11 @@
   }
 
   function readProgress() {
+    // Untracked deliveries stall on a local clock — there is no record whose
+    // deadlines the server could project for them.
+    var stalledNow = false;
+    anns.forEach(function (a) { if (isLocked(a) && a.untracked && a.lockedAt && Date.now() - a.lockedAt > UNTRACKED_STALL_MS) { a.state = "stalled"; stalledNow = true; } });
+    if (stalledNow) patchProgressChips();
     var tracked = anns.filter(isTracked);
     if (!tracked.length || progressReading || document.hidden) { scheduleProgress(); return; }
     progressReading = true;
@@ -1481,7 +1495,7 @@
   document.addEventListener("visibilitychange", function () {
     if (!progressCapable) return;
     if (document.hidden) { clearTimeout(progressTimer); progressTimer = null; }
-    else if (anns.some(isTracked)) readProgress();
+    else if (anns.some(watchesProgress)) readProgress();
   });
 
   // ---- send to AI --------------------------------------------------------
@@ -1567,6 +1581,7 @@
             entry.ann.progressId = matches.length ? matches[0].progress_id : null;
             entry.ann.progressRevision = entry.revision;
             entry.ann.untracked = !entry.ann.progressId;
+            entry.ann.lockedAt = Date.now();
           });
         }
       }
@@ -1603,6 +1618,11 @@
         flushed.forEach(function (entry) { releaseAnchor(entry.ann); if (entry.ann.boxEl) entry.ann.boxEl.remove(); });
         anns = anns.filter(function (a) { return !flushed.some(function (entry) { return entry.ann === a; }); });
       }
+      // A completion observed while its archive was missing (a failed capture)
+      // parked the row as a held ✓; the archive above just landed, so finish
+      // those settlements now.
+      var settledNow = anns.filter(settleReady);
+      if (settledNow.length) retireCompleted(settledNow);
       historyRows = null;
       historyError = false;
       historyVisibleCount = 10;

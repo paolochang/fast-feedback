@@ -127,9 +127,10 @@ test("send lock and edit save respect in-flight revisions", () => {
   // the edit form must refuse to mutate an annotation the lock already claimed.
   assert.match(overlay, /if \(entry\.ann\.revision !== entry\.revision\) return;/);
   assert.match(overlay, /if \(isLocked\(a\)\) \{ showToast\("The AI is working on this — wait for it to settle", true\); return; \}/);
-  // Settlement removes a row only for the delivered revision, never from
-  // under an open editor; closing that editor finishes the settlement.
-  assert.match(overlay, /a\.state === "completed" && a\.revision === a\.progressRevision && editingN !== a\.n/);
+  // Settlement removes a row only for the delivered revision with an existing
+  // archive, never from under an open editor; closing that editor (or the
+  // flush that retries the archive) finishes the settlement.
+  assert.match(overlay, /function settleReady\(a\) \{ return a\.state === "completed" && a\.revision === a\.progressRevision && a\.archivedRevision === a\.revision && editingN !== a\.n; \}/);
   assert.match(overlay, /var settleClosedEdit = function \(\) \{/);
   // Closing the final completed editor lands the user in History, matching
   // the all-completed path of settleProgress.
@@ -166,8 +167,9 @@ test("progress scheduling requires a tracked annotation and tracking includes st
   const overlay = readFileSync(new URL("../assets/overlay.js", import.meta.url), "utf8");
   const schedule = overlay.match(/^  function scheduleProgress\(\) \{[\s\S]*?^  \}\n/m);
   assert.ok(schedule);
-  assert.match(schedule[0], /anns\.some\(isTracked\)/);
+  assert.match(schedule[0], /anns\.some\(watchesProgress\)/);
   assert.match(overlay, /function isTracked\(a\) \{ return !!a\.progressId && \(isLocked\(a\) \|\| a\.state === "stalled"\); \}/);
+  assert.match(overlay, /function watchesProgress\(a\) \{ return isTracked\(a\) \|\| \(isLocked\(a\) && a\.untracked\); \}/);
 });
 
 async function waitFor(predicate) {

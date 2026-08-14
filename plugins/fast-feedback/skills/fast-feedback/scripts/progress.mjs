@@ -184,13 +184,10 @@ export async function readStatuses(ids, { now = Date.now } = {}) {
     for (const id of ids) {
       const path = join(dir, id + ".json");
       const record = await readRecord(path, id);
-      // GC only terminal records past the window. A queued item can still sit
-      // in the pending spool and a processing item can still be finished by a
-      // slow agent; deleting their records would misreport active work as
-      // unknown and orphan a late ffb_complete.
-      const expired = record && TERMINAL_STATUSES.has(record.status) && nowMs - newestTimestamp(record) > PROGRESS_GC_MS;
-      if (!record || expired) {
-        if (record) await rm(path, { force: true });
+      // Reads never delete: a tab hidden past the GC window must still be able
+      // to observe a completion when it returns, or the applied annotation
+      // would unlock and re-send. Collection belongs to createQueued's sweep.
+      if (!record) {
         results.push({ progress_id: id, status: "unknown" });
         continue;
       }
