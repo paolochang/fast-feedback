@@ -196,6 +196,23 @@ test("handleFfbRoute delivers feedback when queued progress cannot be written", 
   } finally { await new Promise((resolve) => server.close(resolve)); }
 });
 
+test("handleFfbRoute refuses delivery when the progress rollback is dirty", async () => {
+  let appended = false;
+  const dirty = new Error("progress rollback incomplete");
+  dirty.code = "FFB_PROGRESS_DIRTY";
+  const server = await startServer("test-session", {
+    progressApi: { createQueued: async () => { throw dirty; } },
+    inboxApi: { appendItems: async () => { appended = true; }, count: async () => 1 },
+  });
+  try {
+    const response = await request({ port: server.address().port, headers: authorizedHeaders(server.address().port), body: JSON.stringify([{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }]) });
+    // Publishing against leftover records would let completions land on
+    // deliveries the overlay never polls; the send must fail outright.
+    assert.equal(response.status, 500);
+    assert.equal(appended, false);
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+});
+
 test("handleFfbRoute reads projected progress and validates bounded ids", async () => {
   const id = "11111111-1111-4111-8111-111111111111";
   const server = await startServer("test-session", { progressApi: { readStatuses: async () => [{ progress_id: id, item_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", status: "processing", sent_at: "2026-01-01T00:00:00.000Z", claimed_at: "2026-01-01T00:01:00.000Z", settled_at: null }] } });

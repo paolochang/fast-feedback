@@ -227,7 +227,11 @@ export function handleFfbRoute(creq, cres, { port, mode = "static", id, inboxApi
         let tracked = true;
         try {
           await progressApi.createQueued(deliveries.map((item) => ({ progress_id: item.progress_id, item_id: item.id, sent_at: sentAt })));
-        } catch {
+        } catch (error) {
+          // A clean failure left no records, so untracked delivery is honest.
+          // A dirty rollback left records the overlay would never poll —
+          // refuse delivery entirely and let the user retry the send.
+          if (error?.code === "FFB_PROGRESS_DIRTY") throw error;
           tracked = false;
         }
         await inboxApi.appendItems(deliveries);

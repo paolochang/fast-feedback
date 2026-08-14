@@ -112,19 +112,23 @@ export async function createQueued(entries, { now = Date.now } = {}) {
     // a record is collectable on the normal window only after some client
     // observed it (readStatuses stamps observed_at); an unobserved one gets
     // the long leash so a hidden tab can still settle it on return.
-    for (const name of await readdir(dir)) {
-      if (!name.endsWith(".json")) continue;
-      const id = name.slice(0, -".json".length);
-      if (!UUID_PATTERN.test(id)) continue;
-      const swept = await readRecord(join(dir, name), id);
-      if (!swept || !TERMINAL_STATUSES.has(swept.status)) continue;
-      const observedMs = Date.parse(swept.observed_at);
-      const expired = Number.isFinite(observedMs)
-        ? nowMs - observedMs > PROGRESS_GC_MS
-        : nowMs - newestTimestamp(swept) > PROGRESS_UNOBSERVED_GC_MS;
-      // Best-effort: a sweep hiccup must not fail the send into untracked mode.
-      if (expired) { try { await rm(join(dir, name), { force: true }); } catch {} }
-    }
+    // The whole sweep is best-effort: no hiccup in it — listing, reading, or
+    // deleting — may fail the send into untracked mode.
+    try {
+      for (const name of await readdir(dir)) {
+        if (!name.endsWith(".json")) continue;
+        const id = name.slice(0, -".json".length);
+        if (!UUID_PATTERN.test(id)) continue;
+        const swept = await readRecord(join(dir, name), id);
+        if (!swept || !TERMINAL_STATUSES.has(swept.status)) continue;
+        const observedMs = Date.parse(swept.observed_at);
+        const expired = Number.isFinite(observedMs)
+          ? nowMs - observedMs > PROGRESS_GC_MS
+          : nowMs - newestTimestamp(swept) > PROGRESS_UNOBSERVED_GC_MS;
+        // One stubborn file must not abort the rest of the sweep.
+        if (expired) { try { await rm(join(dir, name), { force: true }); } catch {} }
+      }
+    } catch {}
     const created = [];
     try {
       for (const record of records) {
@@ -138,9 +142,17 @@ export async function createQueued(entries, { now = Date.now } = {}) {
     } catch (error) {
       // All-or-nothing: a partial batch would make the whole send untracked
       // while the surviving records still accept completions the overlay
-      // would never poll. Roll back what this call created, then rethrow.
+      // would never poll. Roll back what this call created, then rethrow —
+      // and if even the rollback leaves a record behind, say so: the caller
+      // must refuse delivery rather than publish against dirty state.
+      let cleaned = true;
       for (const id of created) {
-        try { await rm(join(dir, id + ".json"), { force: true }); } catch {}
+        try { await rm(join(dir, id + ".json"), { force: true }); } catch { cleaned = false; }
+      }
+      if (!cleaned) {
+        const dirty = new Error("progress rollback incomplete");
+        dirty.code = "FFB_PROGRESS_DIRTY";
+        throw dirty;
       }
       throw error;
     }
