@@ -83,17 +83,22 @@ test("readStatuses derives stalled deadlines without persisting stalled", async 
   });
 });
 
-test("createQueued sweeps expired terminal records but keeps active ones", async () => {
+test("createQueued sweeps observed terminal records on the window and unobserved ones on the long leash", async () => {
   await withProgress(async (dir) => {
     const fresh = "ffffffff-ffff-4fff-8fff-ffffffffffff";
-    await createQueued([queued(FIRST, new Date(1000).toISOString()), queued(SECOND, new Date(1000).toISOString())]);
-    await markProcessing([SECOND], { now: () => 2000 });
-    await markSettled([SECOND], "completed", { now: () => 3000 });
-    const later = 3001 + 24 * 60 * 60 * 1000;
-    await createQueued([queued(fresh, new Date(later).toISOString())], { now: () => later });
-    // The queued record survives (its item can still be pending or in flight);
-    // the expired completed record is collected on the next send.
-    assert.deepEqual((await readdir(join(dir, "progress"))).sort(), [FIRST + ".json", fresh + ".json"]);
+    const unobserved = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    await createQueued([queued(FIRST, new Date(1000).toISOString()), queued(SECOND, new Date(1000).toISOString()), queued(unobserved, new Date(1000).toISOString())]);
+    await markProcessing([SECOND, unobserved], { now: () => 2000 });
+    await markSettled([SECOND, unobserved], "completed", { now: () => 3000 });
+    await readStatuses([SECOND], { now: () => 4000 });   // acknowledgement starts SECOND's sweep clock
+    const afterWindow = 4000 + 24 * 60 * 60 * 1000 + 1;
+    await createQueued([queued(fresh, new Date(afterWindow).toISOString())], { now: () => afterWindow });
+    // Queued FIRST always survives; observed SECOND is collected; the record
+    // no tab has read yet is kept for a hidden tab that may still return.
+    assert.deepEqual((await readdir(join(dir, "progress"))).sort(), [FIRST + ".json", unobserved + ".json", fresh + ".json"].sort());
+    const afterLeash = 3000 + 7 * 24 * 60 * 60 * 1000 + 1;
+    await createQueued([], { now: () => afterLeash });
+    assert.deepEqual((await readdir(join(dir, "progress"))).sort(), [FIRST + ".json", fresh + ".json"].sort());
   });
 });
 

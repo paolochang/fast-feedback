@@ -1620,9 +1620,12 @@
       }
       // A completion observed while its archive was missing (a failed capture)
       // parked the row as a held ✓; the archive above just landed, so finish
-      // those settlements now.
+      // those settlements now — including the all-completed handoff when this
+      // recovery empties Live, exactly as settleProgress would have done.
       var settledNow = anns.filter(settleReady);
       if (settledNow.length) retireCompleted(settledNow);
+      var handedOff = settledNow.length && !anns.length;
+      if (handedOff) setListTab("history");
       historyRows = null;
       historyError = false;
       historyVisibleCount = 10;
@@ -1630,7 +1633,7 @@
       updateHistoryCount();
       refreshHistoryCount();
       renderList();
-      showToast(outcome.toast, outcome.isError);
+      showToast(handedOff ? "All items applied ✓" : outcome.toast, handedOff ? false : outcome.isError);
       scheduleProgress();
     }).catch(function () {
       showToast(archiveStarted ? "Archive failed — items kept" : "Send failed — items kept", true);

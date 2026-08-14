@@ -6,6 +6,10 @@ import { inboxPath, withLock } from "./inbox.mjs";
 export const QUEUED_STALL_MS = 30 * 60 * 1000;
 export const PROCESSING_STALL_MS = 10 * 60 * 1000;
 export const PROGRESS_GC_MS = 24 * 60 * 60 * 1000;
+// A terminal record nobody has read yet must outlive any hidden tab that
+// still needs to observe it; only after this longer leash may the sweep
+// assume no client is coming back for it.
+export const PROGRESS_UNOBSERVED_GC_MS = 7 * PROGRESS_GC_MS;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TERMINAL_STATUSES = new Set(["completed", "failed"]);
@@ -104,15 +108,21 @@ export async function createQueued(entries, { now = Date.now } = {}) {
   return withLock(dir, async () => {
     // Settled records stop being read once their batch leaves the overlay
     // (withdraw must not delete them — see the Cancel race in serve-core), so
-    // each new send sweeps terminal files that have outlived the GC window.
+    // each new send sweeps terminal files. The inbox is shared between tabs:
+    // a record is collectable on the normal window only after some client
+    // observed it (readStatuses stamps observed_at); an unobserved one gets
+    // the long leash so a hidden tab can still settle it on return.
     for (const name of await readdir(dir)) {
       if (!name.endsWith(".json")) continue;
       const id = name.slice(0, -".json".length);
       if (!UUID_PATTERN.test(id)) continue;
       const swept = await readRecord(join(dir, name), id);
-      if (swept && TERMINAL_STATUSES.has(swept.status) && nowMs - newestTimestamp(swept) > PROGRESS_GC_MS) {
-        await rm(join(dir, name), { force: true });
-      }
+      if (!swept || !TERMINAL_STATUSES.has(swept.status)) continue;
+      const observedMs = Date.parse(swept.observed_at);
+      const expired = Number.isFinite(observedMs)
+        ? nowMs - observedMs > PROGRESS_GC_MS
+        : nowMs - newestTimestamp(swept) > PROGRESS_UNOBSERVED_GC_MS;
+      if (expired) await rm(join(dir, name), { force: true });
     }
     const created = [];
     for (const record of records) {
@@ -190,6 +200,12 @@ export async function readStatuses(ids, { now = Date.now } = {}) {
       if (!record) {
         results.push({ progress_id: id, status: "unknown" });
         continue;
+      }
+      // The first terminal read is the acknowledgement that starts the sweep
+      // clock; until then a send from another tab must not collect the record.
+      if (TERMINAL_STATUSES.has(record.status) && !record.observed_at) {
+        record.observed_at = new Date(nowMs).toISOString();
+        await writeAtomically(path, JSON.stringify(record));
       }
       results.push({ ...record, status: displayedStatus(record, nowMs) });
     }
