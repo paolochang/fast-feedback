@@ -1432,7 +1432,12 @@
       if (a.revision !== a.progressRevision) { a.state = null; a.progressRevision = null; }
       a.progressId = null; a.untracked = false;
     });
-    if (completed.length === total) { setListTab("history"); refreshHistoryCount(); showToast("All " + total + " items applied ✓", false); }
+    if (completed.length === total) {
+      refreshHistoryCount(); showToast("All " + total + " items applied ✓", false);
+      // Hand off to History only when Live is actually empty — a draft the
+      // user added while the batch was processing must stay on screen.
+      if (!anns.length) setListTab("history"); else renderList();
+    }
     else renderList();
   }
 
