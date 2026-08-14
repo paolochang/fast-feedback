@@ -126,10 +126,11 @@ test("send lock and edit save respect in-flight revisions", () => {
   // The lock loop must skip entries edited while the send was in flight, and
   // the edit form must refuse to mutate an annotation the lock already claimed.
   assert.match(overlay, /if \(entry\.ann\.revision !== entry\.revision\) return;/);
-  assert.match(overlay, /if \(isHeld\(a\)\) \{ showToast\("The AI is working on this — wait for it to settle", true\); return; \}/);
+  assert.match(overlay, /if \(isLocked\(a\)\) \{ showToast\("The AI is working on this — wait for it to settle", true\); return; \}/);
   // Settlement removes a row only for the delivered revision, never from
-  // under an open editor.
+  // under an open editor; closing that editor finishes the settlement.
   assert.match(overlay, /a\.state === "completed" && a\.revision === a\.progressRevision && editingN !== a\.n/);
+  assert.match(overlay, /var settleClosedEdit = function \(\) \{/);
 });
 
 test("mid-edit renders keep the draft and cancel settles completed siblings", () => {

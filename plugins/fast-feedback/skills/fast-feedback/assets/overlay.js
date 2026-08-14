@@ -915,20 +915,32 @@
           '<div class="__ffb_iact"><button class="__ffb_btn __ffb_ec">Close</button><button class="__ffb_btn primary __ffb_es">Save</button></div>';
         var ta = item.querySelector("textarea");
         setTimeout(function () { ta.focus(); }, 0);
+        var settleClosedEdit = function () {
+          // The AI finished this row while its editor was open — settlement
+          // kept it visible so the draft survived. Closing without saving a
+          // new revision means the applied annotation is done: remove it now.
+          if (a.state === "completed" && a.revision === a.progressRevision) {
+            releaseAnchor(a); if (a.boxEl) a.boxEl.remove();
+            anns = anns.filter(function (other) { return other !== a; });
+          }
+        };
         var save = function () {
           var comment = ta.value.trim();
           if (comment !== a.comment) {
             // A send reply can lock this item while the form is still open;
             // mutating it then would orphan the delivery's tracking. Keep the
             // form (and the typed text) until the item settles.
-            if (isHeld(a)) { showToast("The AI is working on this — wait for it to settle", true); return; }
+            if (isLocked(a)) { showToast("The AI is working on this — wait for it to settle", true); return; }
             a.comment = comment; a.sentToInbox = false; a.revision++;
-          }
+            // Saved as a new revision: this row is fresh feedback now, not the
+            // applied delivery — drop the completion marker so it can re-send.
+            if (a.state === "completed") { a.state = null; a.progressRevision = null; }
+          } else settleClosedEdit();
           editingN = null; renderList();
         };
         var closeEdit = function () {
-          if (ta.value.trim() !== a.comment) confirmDiscard("Discard your changes?", function () { editingN = null; renderList(); });
-          else { editingN = null; renderList(); }
+          if (ta.value.trim() !== a.comment) confirmDiscard("Discard your changes?", function () { settleClosedEdit(); editingN = null; renderList(); });
+          else { settleClosedEdit(); editingN = null; renderList(); }
         };
         editingClose = closeEdit;   // Esc is resolved by the capture listener, which needs this
         item.querySelector(".__ffb_es").onclick = save;
@@ -1398,11 +1410,16 @@
     completed.forEach(function (a) { releaseAnchor(a); if (a.boxEl) a.boxEl.remove(); });
     anns = anns.filter(function (a) { return completed.indexOf(a) === -1; });
     anns.forEach(function (a) { if (!isLocked(a) && a.state !== "stalled" && a.state !== "completed") { a.progressId = null; a.progressRevision = null; a.untracked = false; a.sentToInbox = false; } });
-    // A completion that survived removal settled a superseded revision (the
-    // item stalled and was edited) or a row with an open editor. Release only
-    // its tracking; sentToInbox stays honest — false for an edited revision
-    // that still needs delivery, true for an applied one left visible mid-edit.
-    anns.forEach(function (a) { if (a.state === "completed") { a.state = null; a.progressId = null; a.progressRevision = null; a.untracked = false; } });
+    // A completion that survived removal either settled a superseded revision
+    // (the item stalled and was edited — release everything, the new text
+    // re-sends on the next flush) or sits under an open editor — there the
+    // completed marker must survive so closing the editor can finish the
+    // settlement (see settleClosedEdit); only the polling handle is dropped.
+    anns.forEach(function (a) {
+      if (a.state !== "completed") return;
+      if (a.revision !== a.progressRevision) { a.state = null; a.progressRevision = null; }
+      a.progressId = null; a.untracked = false;
+    });
     if (completed.length === total) { setListTab("history"); refreshHistoryCount(); showToast("All " + total + " items applied ✓", false); }
     else renderList();
   }
