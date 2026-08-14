@@ -113,7 +113,9 @@ export function handleFfbRoute(creq, cres, { port, mode = "static", id, inboxApi
       sendJson(cres, 400, { error: "progress ids must be UUIDs" });
       return true;
     }
-    progressApi.readStatuses(ids).then((records) => {
+    // The overlay poll is the read that actually shows the status to a
+    // client, so it alone acknowledges terminal records for the sweep.
+    progressApi.readStatuses(ids, { acknowledge: true }).then((records) => {
       sendJson(cres, 200, { items: records.map((record) => ({
         progress_id: record.progress_id,
         item_id: record.item_id ?? null,

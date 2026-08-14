@@ -206,7 +206,7 @@ function displayedStatus(record, nowMs) {
   return record.status;
 }
 
-export async function readStatuses(ids, { now = Date.now } = {}) {
+export async function readStatuses(ids, { now = Date.now, acknowledge = false } = {}) {
   requireIds(ids);
   const nowValue = now();
   const nowMs = nowValue instanceof Date ? nowValue.getTime() : Number(nowValue);
@@ -224,9 +224,11 @@ export async function readStatuses(ids, { now = Date.now } = {}) {
         results.push({ progress_id: id, status: "unknown" });
         continue;
       }
-      // The first terminal read is the acknowledgement that starts the sweep
-      // clock; until then a send from another tab must not collect the record.
-      if (TERMINAL_STATUSES.has(record.status) && !record.observed_at) {
+      // The first acknowledged terminal read starts the sweep clock. Only a
+      // read that actually delivers the status to a client may acknowledge;
+      // an internal probe (e.g. Cancel's) must not start the clock for a
+      // completion no overlay has seen.
+      if (acknowledge && TERMINAL_STATUSES.has(record.status) && !record.observed_at) {
         record.observed_at = new Date(nowMs).toISOString();
         await writeAtomically(path, JSON.stringify(record));
       }

@@ -101,7 +101,7 @@ test("createQueued sweeps observed terminal records on the window and unobserved
     await createQueued([queued(FIRST, new Date(1000).toISOString()), queued(SECOND, new Date(1000).toISOString()), queued(unobserved, new Date(1000).toISOString())]);
     await markProcessing([SECOND, unobserved], { now: () => 2000 });
     await markSettled([SECOND, unobserved], "completed", { now: () => 3000 });
-    await readStatuses([SECOND], { now: () => 4000 });   // acknowledgement starts SECOND's sweep clock
+    await readStatuses([SECOND], { now: () => 4000, acknowledge: true });   // acknowledgement starts SECOND's sweep clock
     const afterWindow = 4000 + 24 * 60 * 60 * 1000 + 1;
     await createQueued([queued(fresh, new Date(afterWindow).toISOString())], { now: () => afterWindow });
     // Queued FIRST always survives; observed SECOND is collected; the record
@@ -110,6 +110,19 @@ test("createQueued sweeps observed terminal records on the window and unobserved
     const afterLeash = 3000 + 7 * 24 * 60 * 60 * 1000 + 1;
     await createQueued([], { now: () => afterLeash });
     assert.deepEqual((await readdir(join(dir, "progress"))).sort(), [FIRST + ".json", fresh + ".json"].sort());
+  });
+});
+
+test("only acknowledged reads start the sweep clock", async () => {
+  await withProgress(async (dir) => {
+    await createQueued([queued()]);
+    await markProcessing([FIRST], { now: () => 2000 });
+    await markSettled([FIRST], "completed", { now: () => 3000 });
+    // An internal probe (Cancel's) must not count as the client observation.
+    await readStatuses([FIRST], { now: () => 4000 });
+    assert.equal(JSON.parse(await readFile(join(dir, "progress", FIRST + ".json"), "utf8")).observed_at, undefined);
+    await readStatuses([FIRST], { now: () => 5000, acknowledge: true });
+    assert.equal(JSON.parse(await readFile(join(dir, "progress", FIRST + ".json"), "utf8")).observed_at, new Date(5000).toISOString());
   });
 });
 
