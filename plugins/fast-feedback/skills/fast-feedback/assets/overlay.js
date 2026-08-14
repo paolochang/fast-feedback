@@ -1609,6 +1609,10 @@
     // after the first unlocked and re-sent a row, withdrawing the new spool
     // entry by its reused item id.
     if (cancelInFlight) { showToast("Cancelling…", false); return; }
+    // And never while a send is in flight (the optimistic dispatch hold shows
+    // Cancel early): withdrawing mid-send lets the reply re-track a row whose
+    // spool entry is already gone, locking it until the stall deadline.
+    if (sendInFlight) { showToast("Sending — try again in a moment", false); return; }
     var batch = anns.filter(function (a) { return isLocked(a); });
     var ids = batch.filter(function (a) { return a.progressId; }).map(function (a) { return a.progressId; });
     var itemIds = batch.filter(function (a) { return !a.progressId; }).map(function (a) { return a.id; });
