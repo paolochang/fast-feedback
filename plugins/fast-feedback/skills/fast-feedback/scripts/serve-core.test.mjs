@@ -369,6 +369,31 @@ test("handleFfbRoute withdraws queued spool items but keeps processing records",
   } finally { await new Promise((resolve) => server.close(resolve)); }
 });
 
+test("handleFfbRoute reports confirmed withdrawals when record cleanup fails", async () => {
+  const queued = "11111111-1111-4111-8111-111111111111";
+  const server = await startServer("test-session", {
+    progressApi: {
+      readStatuses: async () => [{ progress_id: queued, item_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", status: "queued" }],
+      withdraw: async () => { throw new Error("record locked"); },
+    },
+    inboxApi: { removePending: async (ids) => ids },
+  });
+  const errors = [];
+  const originalError = console.error;
+  console.error = (error) => errors.push(error);
+  try {
+    const response = await request({ port: server.address().port, path: "/__ffb__/withdraw?overlay=1", headers: authorizedHeaders(server.address().port), body: JSON.stringify({ ids: [queued] }) });
+    // The spool withdrawal is irreversible; a record-cleanup hiccup must not
+    // hide it behind a 500, or the row stays locked with no work left.
+    assert.equal(response.status, 200);
+    assert.deepEqual(JSON.parse(response.body).withdrawn, [queued]);
+    assert.equal(errors.length, 1);
+  } finally {
+    console.error = originalError;
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("renderBoot injects authenticated progress and withdraw helpers", async () => {
   const calls = [];
   const helpers = bootHelpers(async (url, options = {}) => { calls.push({ url, options }); return { ok: true, json: async () => ({ items: [] }) }; });

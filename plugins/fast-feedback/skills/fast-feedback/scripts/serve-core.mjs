@@ -361,7 +361,10 @@ export function handleFfbRoute(creq, cres, { port, mode = "static", id, inboxApi
         // observed the completion yet, and deleting it here would make the
         // next poll read "unknown" and unlock already-applied feedback for a
         // duplicate send. Expired terminal records are swept by createQueued.
-        if (withdrawn.length) await progressApi.withdraw(withdrawn);
+        // Cleanup is best-effort: the spool withdrawal above is irreversible,
+        // so its result must reach the overlay even if this hiccups — a 500
+        // here would leave the row locked with no work left for the AI.
+        if (withdrawn.length) { try { await progressApi.withdraw(withdrawn); } catch (error) { console.error(error); } }
         sendJson(cres, 200, {
           withdrawn,
           already_delivered: ids.filter((progressId) => !withdrawnSet.has(progressId)),
