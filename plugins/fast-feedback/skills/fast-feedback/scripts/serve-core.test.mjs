@@ -248,6 +248,25 @@ test("renderBoot injects authenticated progress and withdraw helpers", async () 
   assert.equal(calls[1].options.headers["x-ffb-token"], core.FFB_SEND_TOKEN);
 });
 
+test("renderBoot's progress helpers chunk oversized id batches and merge replies", async () => {
+  const ids = Array.from({ length: 250 }, (_, index) => "id-" + index);
+  const calls = [];
+  const helpers = bootHelpers(async (url, options = {}) => {
+    calls.push({ url, options });
+    return { ok: true, json: async () => ({ items: ["polled"], withdrawn: ["gone"], already_delivered: ["kept"] }) };
+  });
+  const progress = await helpers.__FFB_PROGRESS(ids);
+  assert.equal(calls.length, 3);
+  assert.ok(calls.every(({ url }) => url.split("%2C").length <= 100));
+  // JSON round-trips normalize objects built inside the boot script's vm context.
+  assert.deepEqual(JSON.parse(JSON.stringify(progress)), { items: ["polled", "polled", "polled"] });
+  calls.length = 0;
+  const withdrawal = await helpers.__FFB_WITHDRAW(ids);
+  assert.equal(calls.length, 3);
+  assert.ok(calls.every(({ options }) => JSON.parse(options.body).ids.length <= 100));
+  assert.deepEqual(JSON.parse(JSON.stringify(withdrawal)), { withdrawn: ["gone", "gone", "gone"], already_delivered: ["kept", "kept", "kept"] });
+});
+
 test("renderBoot's send helper resolves to the parsed send reply", async () => {
   const reply = { ok: true, count: 1, progress: true, items: [{ item_id: "a", progress_id: "b" }] };
   const helpers = bootHelpers(async () => ({ ok: true, json: async () => reply }));

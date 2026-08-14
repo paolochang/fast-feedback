@@ -139,11 +139,12 @@ test("full renders and progress patches share completed control holding", () => 
   assert.match(patch[0], /var held = isHeld\(a\);/);
 });
 
-test("progress scheduling requires a tracked locked annotation", () => {
+test("progress scheduling requires a tracked annotation and tracking includes stalled items", () => {
   const overlay = readFileSync(new URL("../assets/overlay.js", import.meta.url), "utf8");
   const schedule = overlay.match(/^  function scheduleProgress\(\) \{[\s\S]*?^  \}\n/m);
   assert.ok(schedule);
-  assert.match(schedule[0], /anns\.some\(function \(a\) \{ return isLocked\(a\) && a\.progressId; \}\)/);
+  assert.match(schedule[0], /anns\.some\(isTracked\)/);
+  assert.match(overlay, /function isTracked\(a\) \{ return !!a\.progressId && \(isLocked\(a\) \|\| a\.state === "stalled"\); \}/);
 });
 
 async function waitFor(predicate) {

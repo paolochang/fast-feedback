@@ -171,7 +171,12 @@ export async function readStatuses(ids, { now = Date.now } = {}) {
     for (const id of ids) {
       const path = join(dir, id + ".json");
       const record = await readRecord(path, id);
-      if (!record || nowMs - newestTimestamp(record) > PROGRESS_GC_MS) {
+      // GC only terminal records past the window. A queued item can still sit
+      // in the pending spool and a processing item can still be finished by a
+      // slow agent; deleting their records would misreport active work as
+      // unknown and orphan a late ffb_complete.
+      const expired = record && TERMINAL_STATUSES.has(record.status) && nowMs - newestTimestamp(record) > PROGRESS_GC_MS;
+      if (!record || expired) {
         if (record) await rm(path, { force: true });
         results.push({ progress_id: id, status: "unknown" });
         continue;

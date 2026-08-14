@@ -673,6 +673,9 @@
   }
   function isLocked(a) { return a.state === "queued" || a.state === "processing"; }
   function isHeld(a) { return isLocked(a) || a.state === "completed"; }
+  // Stalled items unlock but stay polled: their record survives server-side,
+  // so a late ffb_complete must still be able to land on the card.
+  function isTracked(a) { return !!a.progressId && (isLocked(a) || a.state === "stalled"); }
   function deleteAnn(a) {
     confirmDiscard("Delete annotation [" + a.n + "]? This can't be undone.", function () {
       releaseAnchor(a);
@@ -1353,7 +1356,7 @@
 
   function scheduleProgress() {
     clearTimeout(progressTimer); progressTimer = null;
-    if (!progressCapable || document.hidden || !anns.some(function (a) { return isLocked(a) && a.progressId; })) return;
+    if (!progressCapable || document.hidden || !anns.some(isTracked)) return;
     progressTimer = setTimeout(readProgress, progressFailures >= 3 ? 5000 : 1500);
   }
 
@@ -1385,14 +1388,14 @@
     var ids = anns.filter(function (a) { return a.progressId && (a.state === "completed" || a.state === "failed"); }).map(function (a) { return a.progressId; });
     completed.forEach(function (a) { releaseAnchor(a); if (a.boxEl) a.boxEl.remove(); });
     anns = anns.filter(function (a) { return completed.indexOf(a) === -1; });
-    anns.forEach(function (a) { if (!isLocked(a)) { a.progressId = null; a.untracked = false; a.sentToInbox = false; } });
+    anns.forEach(function (a) { if (!isLocked(a) && a.state !== "stalled") { a.progressId = null; a.untracked = false; a.sentToInbox = false; } });
     if (ids.length && typeof window.__FFB_WITHDRAW === "function") { try { Promise.resolve(window.__FFB_WITHDRAW(ids)).catch(function () {}); } catch (e) {} }
     if (completed.length === total) { setListTab("history"); refreshHistoryCount(); showToast("All " + total + " items applied ✓", false); }
     else renderList();
   }
 
   function readProgress() {
-    var tracked = anns.filter(function (a) { return isLocked(a) && a.progressId; });
+    var tracked = anns.filter(isTracked);
     if (!tracked.length || progressReading || document.hidden) { scheduleProgress(); return; }
     progressReading = true;
     var current = {}, total = anns.filter(function (a) { return !!a.progressId || a.untracked; }).length;
@@ -1401,7 +1404,9 @@
       var result = progressOutcome(current, reply && reply.items || []);
       progressFailures = 0;
       anns.forEach(function (a) { if (a.progressId && Object.prototype.hasOwnProperty.call(result.states, a.progressId)) a.state = result.states[a.progressId]; });
-      if (result.settled && !anns.some(function (a) { return isLocked(a) && a.untracked; })) settleProgress(total);
+      // The changed gate keeps a batch that is already all-stalled (still
+      // polled, still terminal) from re-settling and re-rendering every tick.
+      if (result.changed && result.settled && !anns.some(function (a) { return isLocked(a) && a.untracked; })) settleProgress(total);
       else if (result.changed) patchProgressChips();
     }).catch(function () {
       progressFailures++;
@@ -1432,7 +1437,7 @@
   document.addEventListener("visibilitychange", function () {
     if (!progressCapable) return;
     if (document.hidden) { clearTimeout(progressTimer); progressTimer = null; }
-    else if (anns.some(isLocked)) readProgress();
+    else if (anns.some(isTracked)) readProgress();
   });
 
   // ---- send to AI --------------------------------------------------------
@@ -1494,9 +1499,7 @@
     // stays independent of capture — inbox delivery must not hinge on html2canvas.
     var capturePromise = toArchive.length ? capturePng(true) : null;
     if (capturePromise) capturePromise.catch(function () {});   // send-fail paths discard it; avoid an unhandled rejection
-    var sendReply = null;
     Promise.resolve(request).then(function (reply) {
-      sendReply = reply;
       if (canSend && toSend.length) {
         sentToInbox = true;
         // Only mark the revision we actually sent as delivered. If the user edited
@@ -1504,6 +1507,20 @@
         // false and bumps revision), leave it unsent so the edited comment is
         // re-delivered to the inbox on the next flush.
         toSend.forEach(function (entry) { if (entry.ann.revision === entry.revision) entry.ann.sentToInbox = true; });
+        // Lock right here, before the archive below gets a chance to reject:
+        // the items are already queued for the AI either way. A progress:false
+        // reply carries IDs that have no records — storing one would let the
+        // first poll read "unknown" and unlock delivered work, so those items
+        // stay locked as untracked instead.
+        if (progressCapable) {
+          editingN = null;
+          toSend.forEach(function (entry) {
+            var matches = reply && reply.progress !== false && reply.items ? reply.items.filter(function (item) { return item.item_id === entry.id; }) : [];
+            entry.ann.state = "queued";
+            entry.ann.progressId = matches.length ? matches[0].progress_id : null;
+            entry.ann.untracked = !entry.ann.progressId;
+          });
+        }
       }
       if (!toArchive.length) return null;
       archiveStarted = true;
@@ -1533,15 +1550,6 @@
       });
     }).then(function () {
       var outcome = flushOutcome({ sentToInbox: sentToInbox, archivedNew: toArchive.length, count: items.length, inFlight: items.length - toSend.length });
-      if (outcome.lock && progressCapable) {
-        editingN = null;
-        toSend.forEach(function (entry) {
-          var matches = sendReply && sendReply.items ? sendReply.items.filter(function (item) { return item.item_id === entry.id; }) : [];
-          entry.ann.state = "queued";
-          entry.ann.progressId = matches.length ? matches[0].progress_id : null;
-          entry.ann.untracked = sendReply && sendReply.progress === false || !entry.ann.progressId;
-        });
-      }
       if (outcome.clear) {
         var flushed = snapshot.filter(function (entry) { return entry.ann.revision === entry.revision && anns.indexOf(entry.ann) !== -1; });
         flushed.forEach(function (entry) { releaseAnchor(entry.ann); if (entry.ann.boxEl) entry.ann.boxEl.remove(); });
@@ -1558,6 +1566,9 @@
       scheduleProgress();
     }).catch(function () {
       showToast(archiveStarted ? "Archive failed — items kept" : "Send failed — items kept", true);
+      // The archive rejected after delivery: the lock above already landed, so
+      // surface it and start polling rather than leaving delivered items editable.
+      if (sentToInbox) { renderList(); scheduleProgress(); }
     }).then(function () {
       sendInFlight = false;
     });
