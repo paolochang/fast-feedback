@@ -689,7 +689,12 @@
     anns = anns.filter(function (a) { return list.indexOf(a) === -1; });
   }
   function deleteAnn(a) {
+    // Recheck the hold here, not only in the render: a send reply can lock
+    // this row while stale pre-lock controls — or an already-open confirm
+    // dialog — are still live.
+    if (isHeld(a)) return;
     confirmDiscard("Delete annotation [" + a.n + "]? This can't be undone.", function () {
+      if (isHeld(a)) { showToast("The AI is working on this", false); renderList(); return; }
       releaseAnchor(a);
       if (a.boxEl) a.boxEl.remove();
       anns.splice(anns.indexOf(a), 1);
@@ -1601,6 +1606,9 @@
             entry.ann.untracked = !entry.ann.progressId;
             entry.ann.lockedAt = Date.now();
           });
+          // The stale pre-lock controls stay clickable until the next full
+          // render (after the archive settles); patch them right away.
+          patchProgressChips();
         }
       }
       if (!toArchive.length) return null;
