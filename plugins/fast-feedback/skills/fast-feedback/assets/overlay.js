@@ -2345,7 +2345,13 @@
         if (action === "write") setActive(!active);
         else if (action === "list") toggleList();
         else if (action === "copy") copyAll();
-        else if (action === "send") sendToAI();
+        else if (action === "send") {
+          // One batch at a time: the blind hotkey must not start a second
+          // concurrent batch while one is locked — and unlike the labelled
+          // footer button, it must not cancel work by surprise either.
+          if (progressCapable && anns.some(isLocked)) showToast("The AI is working — use Cancel in the panel", false);
+          else sendToAI();
+        }
         else if (action === "screenshot") takeScreenshot();
         else if (action === "settings") openSettings();
         return;
