@@ -675,7 +675,10 @@
   function isHeld(a) { return isLocked(a) || a.state === "completed" || a.withdrawing === true; }
   // Stalled items unlock but stay polled: their record survives server-side,
   // so a late ffb_complete must still be able to land on the card.
-  function isTracked(a) { return !!a.progressId && (isLocked(a) || a.state === "stalled"); }
+  // Withdrawing rows are excluded: polling one can observe "unknown" after
+  // the server deletes its record and strip the id the withdrawal reply is
+  // about to validate against.
+  function isTracked(a) { return !!a.progressId && !a.withdrawing && (isLocked(a) || a.state === "stalled"); }
   // Untracked deliveries have no record to poll, but still need the watch
   // loop: a local deadline stands in for the server's stall detection, giving
   // a claimed-but-unreportable delivery an exit from its lock.
@@ -720,8 +723,10 @@
           // Unconfirmed means the AI already took it: keep the row so the
           // eventual completion still lands somewhere visible.
           if (!confirmed) { showToast("The AI already took this item — it will settle when the AI finishes", false); patchProgressChips(); return; }
-          // Remove only the delivery we actually withdrew.
-          if (anns.indexOf(a) === -1 || a.revision !== revision || a.progressId !== progressId) { renderList(); return; }
+          // Remove only the delivery we actually withdrew. A null progressId
+          // is fine — a poll that raced the withdrawal may have read "unknown"
+          // and released the handle; the revision pin still identifies the row.
+          if (anns.indexOf(a) === -1 || a.revision !== revision || (a.progressId !== null && a.progressId !== progressId)) { renderList(); return; }
           removeAnn(a);
         }).catch(function () { a.withdrawing = false; showToast("Couldn't withdraw — item kept", true); patchProgressChips(); });
       }, "Cancel", "Discard");
