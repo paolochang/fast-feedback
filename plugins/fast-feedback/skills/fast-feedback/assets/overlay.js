@@ -1223,6 +1223,9 @@
     // the only visible record of that feedback — Clear must not erase it.
     if (!anns.length || anns.some(isHeld)) return;
     confirmDiscard("Clear all " + anns.length + " feedback item" + (anns.length > 1 ? "s" : "") + "? This can't be undone.", function () {
+      // A send reply can lock rows while this dialog was open; rows the AI
+      // now owns must survive the confirmation, like deleteAnn's recheck.
+      if (anns.some(isHeld)) { showToast("The AI is working on this", false); renderList(); return; }
       anns.forEach(function (a) { releaseAnchor(a); if (a.boxEl) a.boxEl.remove(); });
       anns = [];
       counter = 0;
