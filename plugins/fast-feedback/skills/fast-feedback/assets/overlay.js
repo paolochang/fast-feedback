@@ -1554,6 +1554,9 @@
     var canArchive = typeof window.__FFB_ARCHIVE === "function" || hasIndexedDb();
     if (!canSend && !canArchive) { showToast("No server — use Copy All", false); return; }
     if (sendInFlight) { showToast("Sending…", false); return; }
+    // A pending withdrawal must settle first: dispatching now could let its
+    // late confirmation remove a row the new send is about to lock.
+    if (anns.some(function (a) { return a.withdrawing === true; })) { showToast("Withdrawing an item — try again in a moment", false); return; }
     // Don't start a flush while a manual Screenshot capture is running: captures
     // serialize (they need contradictory box visibility), so the archive capture
     // would queue AFTER we froze the rects/URL and dispatched the send — a page
