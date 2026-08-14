@@ -1583,7 +1583,15 @@
     // deadlines the server could project for them.
     var stalledNow = false;
     anns.forEach(function (a) { if (isLocked(a) && a.untracked && a.lockedAt && Date.now() - a.lockedAt > UNTRACKED_STALL_MS) { a.state = "stalled"; stalledNow = true; } });
-    if (stalledNow) patchProgressChips();
+    if (stalledNow) {
+      patchProgressChips();
+      // The stall may have been the last blocker holding settlement back —
+      // and polling can end right here (stalled untracked rows are not
+      // watched), so already-terminal rows must settle now or never.
+      if (!anns.some(isLocked) && anns.some(function (a) { return a.state === "completed"; })) {
+        settleProgress(anns.filter(function (a) { return !!a.progressId || a.untracked; }).length);
+      }
+    }
     var tracked = anns.filter(isTracked);
     if (!tracked.length || progressReading || document.hidden) { scheduleProgress(); return; }
     progressReading = true;
