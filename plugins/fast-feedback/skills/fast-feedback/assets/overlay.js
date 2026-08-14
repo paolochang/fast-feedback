@@ -736,15 +736,18 @@
   // after the claim TTL — a died agent's claim will have been recovered to
   // the spool by then and can confirm — and release the row either way.
   var UNTRACKED_WITHDRAW_RETRY_MS = 90 * 1000;
-  function scheduleUntrackedRelease(a) {
+  // retire=false frees the row for re-send (a superseded edit); retire=true
+  // removes it (a deletion) — untracked claims have no record that could ever
+  // settle, so both intents share this bounded reconciliation.
+  function scheduleUntrackedRelease(a, retire) {
     // One retry per row: a newer edit supersedes any pending one, so no stale
     // request can outlive a release and withdraw the row's next delivery.
     if (a.untrackedRetryTimer) clearTimeout(a.untrackedRetryTimer);
     a.untrackedRetryTimer = setTimeout(function () {
       a.untrackedRetryTimer = null;
-      if (anns.indexOf(a) === -1 || !a.untracked || a.sentToInbox) return;
+      if (anns.indexOf(a) === -1 || !a.untracked || (!retire && a.sentToInbox)) return;
       // An in-flight withdrawal owns the row; come back after it settles.
-      if (a.withdrawing) { scheduleUntrackedRelease(a); return; }
+      if (a.withdrawing) { scheduleUntrackedRelease(a, retire); return; }
       var revision = a.revision;
       // Hold the row through the request: Send stays blocked and no newer
       // retry can start, so this request cannot race a re-send on the server
@@ -753,9 +756,14 @@
       patchProgressChips();
       var release = function (confirmed) {
         a.withdrawing = false;
-        // Re-validate at reply time: the row must still be the same unsent
-        // untracked revision this retry was dispatched for.
-        if (anns.indexOf(a) === -1 || !a.untracked || a.sentToInbox || a.revision !== revision) { patchProgressChips(); return; }
+        // Re-validate at reply time: the row must still be the same untracked
+        // revision this retry was dispatched for.
+        if (anns.indexOf(a) === -1 || !a.untracked || a.revision !== revision || (!retire && a.sentToInbox)) { patchProgressChips(); return; }
+        if (retire) {
+          if (!confirmed) showToast("The AI already took this item — it may still be applied", false);
+          removeAnn(a);
+          return;
+        }
         if (!confirmed) showToast("The previous version was already taken — re-sending may duplicate it", false);
         a.untracked = false; a.state = null;
         renderList();
@@ -789,10 +797,17 @@
           var confirmed = progressId
             ? (reply && reply.withdrawn || []).indexOf(progressId) !== -1
             : (reply && reply.withdrawn_items || []).indexOf(a.id) !== -1;
-          // Unconfirmed means the AI already took it: keep the row so the
-          // eventual completion still lands somewhere visible. Restart the
+          // Unconfirmed means the AI already took it. A tracked row keeps its
+          // record and settles visibly; an untracked one never can, so it
+          // gets the bounded reconciliation and is then retired. Restart the
           // watch loop — it may have died while this row was excluded.
-          if (!confirmed) { showToast("The AI already took this item — it will settle when the AI finishes", false); patchProgressChips(); scheduleProgress(); return; }
+          if (!confirmed) {
+            if (progressId) { showToast("The AI already took this item — it will settle when the AI finishes", false); }
+            else { showToast("The AI may already have this item — removing shortly", false); scheduleUntrackedRelease(a, true); }
+            patchProgressChips();
+            scheduleProgress();
+            return;
+          }
           // Remove only the delivery we actually withdrew. A null progressId
           // is fine — a poll that raced the withdrawal may have read "unknown"
           // and released the handle; the revision pin still identifies the row.
@@ -1692,6 +1707,15 @@
       showToast("Send failed — items kept", true);
       return;
     }
+    // Hold the outgoing rows from the moment of dispatch: an edit saved while
+    // /send was in flight would otherwise leave the delivered old revision
+    // unreconciled and the edit immediately resendable as a duplicate. The
+    // reply upgrades this optimistic hold to real tracking (or lifts it for
+    // rows a partial response reports undelivered); a failed send lifts it.
+    if (request && progressCapable) {
+      toSend.forEach(function (entry) { entry.ann.state = "queued"; entry.ann.untracked = true; entry.ann.lockedAt = Date.now(); });
+      patchProgressChips();
+    }
     // Capture the page at flush start, in parallel with the already-dispatched
     // send, so the screenshot, frozen box geometry, and URL are one coherent
     // snapshot: an SPA nav/resize/reflow during the in-flight send can't smear a
@@ -1727,7 +1751,9 @@
             // revision: the old delivery's progress must not claim (and later
             // settle away) the edited annotation. Leave it unlocked for re-send.
             if (entry.ann.revision !== entry.revision) return;
-            if (deliveredIds && !deliveredIds[entry.id]) return;
+            // A partial reply reports this row undelivered: lift the
+            // optimistic dispatch hold so it stays local and retryable.
+            if (deliveredIds && !deliveredIds[entry.id]) { entry.ann.state = null; entry.ann.untracked = false; entry.ann.lockedAt = null; return; }
             var matches = reply && reply.progress !== false && reply.items ? reply.items.filter(function (item) { return item.item_id === entry.id; }) : [];
             entry.ann.state = "queued";
             entry.ann.progressId = matches.length ? matches[0].progress_id : null;
@@ -1795,6 +1821,14 @@
       scheduleProgress();
     }).catch(function () {
       showToast(archiveStarted ? "Archive failed — items kept" : "Send failed — items kept", true);
+      // The send itself failed: lift the optimistic dispatch hold so the
+      // undelivered rows are editable and retryable again.
+      if (!sentToInbox && progressCapable) {
+        toSend.forEach(function (entry) {
+          if (entry.ann.revision === entry.revision && entry.ann.state === "queued" && !entry.ann.progressId) { entry.ann.state = null; entry.ann.untracked = false; entry.ann.lockedAt = null; }
+        });
+        renderList();
+      }
       // The archive rejected after delivery: the lock above already landed, so
       // surface it and start polling rather than leaving delivered items editable.
       if (sentToInbox) { renderList(); scheduleProgress(); }
