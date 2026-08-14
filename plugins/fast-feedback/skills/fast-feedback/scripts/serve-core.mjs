@@ -61,7 +61,7 @@ const h2c = readFileSync(join(here, "..", "assets", "html2canvas.min.js"), "utf8
 const overlayPath = join(here, "..", "assets", "overlay.js");
 const saveFn = "window.__FFB_SAVE=function(p){return fetch('/__ffb__/settings',{method:'POST',headers:{'content-type':'application/json','x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "},body:JSON.stringify(p)}).then(function(r){if(!r.ok)throw new Error('Settings failed: '+r.status);return r;});};";
 const saveShotFn = "window.__FFB_SAVE_SHOT=function(blob){return fetch('/__ffb__/screenshot',{method:'POST',headers:{'content-type':'image/png','x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "},body:blob}).then(function(r){if(!r.ok)throw new Error('Screenshot failed: '+r.status);return r.json();}).then(function(j){return j&&j.path;});};";
-const sendFn = "window.__FFB_SEND=function(items){return fetch('/__ffb__/send',{method:'POST',headers:{'content-type':'application/json','x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "},body:JSON.stringify(items)}).then(function(r){if(!r.ok)throw new Error('Send failed: '+r.status);return r;});};";
+const sendFn = "window.__FFB_SEND=function(items){return fetch('/__ffb__/send',{method:'POST',headers:{'content-type':'application/json','x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "},body:JSON.stringify(items)}).then(function(r){if(!r.ok)throw new Error('Send failed: '+r.status);return r.json();});};";
 const archiveFn = "window.__FFB_ARCHIVE=function(body){return fetch('/__ffb__/history',{method:'POST',headers:{'content-type':'application/x-ffb-history','x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "},body:body}).then(function(r){if(!r.ok)throw new Error('Archive failed: '+r.status);return r;});};";
 const historyReadFns = "window.__FFB_HISTORY_LIST=function(){return fetch('/__ffb__/history',{headers:{'x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "}}).then(function(r){if(!r.ok)throw new Error('History request failed: '+r.status);return r.json();});};" +
   "window.__FFB_HISTORY_META=function(id){return fetch('/__ffb__/history/'+id+'.json',{headers:{'x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "}}).then(function(r){if(!r.ok)throw new Error('History request failed: '+r.status);return r.json();});};" +
@@ -292,7 +292,11 @@ export function handleFfbRoute(creq, cres, { port, mode = "static", id, inboxApi
         const removedItemIds = new Set(await inboxApi.removePending(queued.map((record) => record.item_id)));
         const withdrawn = queued.filter((record) => removedItemIds.has(record.item_id)).map((record) => record.progress_id);
         const withdrawnSet = new Set(withdrawn);
-        await progressApi.withdraw(ids);
+        // Delete only records that are done with: cancelled deliveries and
+        // terminal outcomes. A processing record must survive so a late
+        // ffb_complete can still settle the delivery it belongs to.
+        const disposable = withdrawn.concat(records.filter((record) => record.status === "completed" || record.status === "failed").map((record) => record.progress_id));
+        if (disposable.length) await progressApi.withdraw(disposable);
         sendJson(cres, 200, { withdrawn, already_delivered: ids.filter((progressId) => !withdrawnSet.has(progressId)) });
       } catch {
         sendJson(cres, 500, { error: "could not withdraw feedback" });

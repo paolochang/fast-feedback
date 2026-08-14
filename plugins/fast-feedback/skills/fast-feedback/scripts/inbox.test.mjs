@@ -239,7 +239,9 @@ test("readAndClear reports delivered items to its hook while peek does not", asy
     const legacy = { comment: "no progress record" };
     const tracked = { id: itemId, comment: "mark me", progress_id: progressId };
     const calls = [];
-    await createQueued([{ progress_id: progressId, item_id: itemId, sent_at: "2026-08-06T12:00:00.000Z" }]);
+    // A fresh timestamp keeps the record inside both the stall deadline and
+    // the PROGRESS_GC_MS window regardless of when the suite runs.
+    await createQueued([{ progress_id: progressId, item_id: itemId, sent_at: new Date().toISOString() }]);
     await appendItems([legacy, tracked]);
 
     assert.equal((await peek()).length, 2);

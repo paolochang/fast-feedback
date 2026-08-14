@@ -1379,7 +1379,10 @@
 
   function settleProgress(total) {
     var completed = anns.filter(function (a) { return a.progressId && a.state === "completed"; });
-    var ids = anns.filter(function (a) { return a.progressId; }).map(function (a) { return a.progressId; });
+    // Only clean up records with a terminal outcome. A stalled item stays
+    // pending in the inbox (withdrawing it would cancel feedback the AI may
+    // yet pick up), and its record must survive for a late ffb_complete.
+    var ids = anns.filter(function (a) { return a.progressId && (a.state === "completed" || a.state === "failed"); }).map(function (a) { return a.progressId; });
     completed.forEach(function (a) { releaseAnchor(a); if (a.boxEl) a.boxEl.remove(); });
     anns = anns.filter(function (a) { return completed.indexOf(a) === -1; });
     anns.forEach(function (a) { if (!isLocked(a)) { a.progressId = null; a.untracked = false; a.sentToInbox = false; } });
@@ -1411,11 +1414,18 @@
     var ids = batch.filter(function (a) { return a.progressId; }).map(function (a) { return a.progressId; });
     if (typeof window.__FFB_WITHDRAW !== "function") return;
     Promise.resolve(window.__FFB_WITHDRAW(ids)).then(function (reply) {
-      batch.forEach(function (a) { a.state = null; a.progressId = null; a.untracked = false; a.sentToInbox = false; });
-      progressFailures = 0; clearTimeout(progressTimer); progressTimer = null; renderList();
-      var withdrawn = reply && reply.withdrawn ? reply.withdrawn.length : 0;
+      // Unlock only what the server actually pulled back (plus untracked items
+      // it can't know about). Claimed work stays locked and tracked so its
+      // eventual completion still lands on the card.
+      var withdrawnIds = reply && reply.withdrawn ? reply.withdrawn : [];
+      batch.forEach(function (a) {
+        if (a.progressId && withdrawnIds.indexOf(a.progressId) === -1) return;
+        a.state = null; a.progressId = null; a.untracked = false; a.sentToInbox = false;
+      });
+      progressFailures = 0; renderList();
       var missed = reply && reply.already_delivered ? reply.already_delivered.length : 0;
-      showToast(withdrawn + " withdrawn" + (missed ? " · " + missed + " couldn't be cancelled" : ""), false);
+      showToast(withdrawnIds.length + " withdrawn" + (missed ? " · " + missed + " couldn't be cancelled" : ""), false);
+      scheduleProgress();
     }).catch(function () { showToast("Cancel failed · items kept", true); });
   }
 

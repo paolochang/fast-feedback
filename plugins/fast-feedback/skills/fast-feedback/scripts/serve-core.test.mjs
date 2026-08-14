@@ -211,9 +211,10 @@ test("handleFfbRoute reads projected progress and validates bounded ids", async 
   } finally { await new Promise((resolve) => server.close(resolve)); }
 });
 
-test("handleFfbRoute withdraws queued spool items and deletes all requested records", async () => {
+test("handleFfbRoute withdraws queued spool items but keeps processing records", async () => {
   const queued = "11111111-1111-4111-8111-111111111111";
   const processing = "22222222-2222-4222-8222-222222222222";
+  const completed = "33333333-3333-4333-8333-333333333333";
   let removedItemIds;
   let deletedIds;
   const server = await startServer("test-session", {
@@ -221,17 +222,18 @@ test("handleFfbRoute withdraws queued spool items and deletes all requested reco
       readStatuses: async () => [
         { progress_id: queued, item_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", status: "queued" },
         { progress_id: processing, item_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", status: "processing" },
+        { progress_id: completed, item_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", status: "completed" },
       ],
       withdraw: async (ids) => { deletedIds = ids; },
     },
     inboxApi: { removePending: async (ids) => { removedItemIds = ids; return ids; } },
   });
   try {
-    const response = await request({ port: server.address().port, path: "/__ffb__/withdraw?overlay=1", headers: authorizedHeaders(server.address().port), body: JSON.stringify({ ids: [queued, processing] }) });
+    const response = await request({ port: server.address().port, path: "/__ffb__/withdraw?overlay=1", headers: authorizedHeaders(server.address().port), body: JSON.stringify({ ids: [queued, processing, completed] }) });
     assert.equal(response.status, 200);
     assert.deepEqual(removedItemIds, ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]);
-    assert.deepEqual(deletedIds, [queued, processing]);
-    assert.deepEqual(JSON.parse(response.body), { withdrawn: [queued], already_delivered: [processing] });
+    assert.deepEqual(deletedIds, [queued, completed]);
+    assert.deepEqual(JSON.parse(response.body), { withdrawn: [queued], already_delivered: [processing, completed] });
   } finally { await new Promise((resolve) => server.close(resolve)); }
 });
 
@@ -244,6 +246,12 @@ test("renderBoot injects authenticated progress and withdraw helpers", async () 
   assert.equal(calls[0].options.headers["x-ffb-token"], core.FFB_SEND_TOKEN);
   assert.equal(calls[1].url, "/__ffb__/withdraw");
   assert.equal(calls[1].options.headers["x-ffb-token"], core.FFB_SEND_TOKEN);
+});
+
+test("renderBoot's send helper resolves to the parsed send reply", async () => {
+  const reply = { ok: true, count: 1, progress: true, items: [{ item_id: "a", progress_id: "b" }] };
+  const helpers = bootHelpers(async () => ({ ok: true, json: async () => reply }));
+  assert.deepEqual(await helpers.__FFB_SEND([{ comment: "hi" }]), reply);
 });
 
 test("injectBoot inserts before the last closing body tag and appends without one", () => {
