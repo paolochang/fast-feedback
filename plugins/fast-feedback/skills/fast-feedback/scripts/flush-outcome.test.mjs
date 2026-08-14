@@ -170,6 +170,8 @@ test("progress scheduling requires a tracked annotation and tracking includes st
   assert.match(schedule[0], /anns\.some\(watchesProgress\)/);
   assert.match(overlay, /function isTracked\(a\) \{ return !!a\.progressId && \(isLocked\(a\) \|\| a\.state === "stalled"\); \}/);
   assert.match(overlay, /function watchesProgress\(a\) \{ return isTracked\(a\) \|\| \(isLocked\(a\) && a\.untracked\); \}/);
+  // Destructive actions gate on live server-side work, not just the lock.
+  assert.match(overlay, /function hasLiveDelivery\(a\) \{ return isHeld\(a\) \|\| \(a\.state === "stalled" && \(a\.progressId \|\| a\.untracked \|\| a\.sentToInbox\)\); \}/);
 });
 
 async function waitFor(predicate) {

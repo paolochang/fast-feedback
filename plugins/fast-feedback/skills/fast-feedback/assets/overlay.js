@@ -688,18 +688,39 @@
     list.forEach(function (a) { releaseAnchor(a); if (a.boxEl) a.boxEl.remove(); });
     anns = anns.filter(function (a) { return list.indexOf(a) === -1; });
   }
+  // A stalled row unlocks for editing, but its server-side work (pending or
+  // claimed) is still live — destructive actions must withdraw it first.
+  function hasLiveDelivery(a) { return isHeld(a) || (a.state === "stalled" && (a.progressId || a.untracked || a.sentToInbox)); }
+  function removeAnn(a) {
+    releaseAnchor(a);
+    if (a.boxEl) a.boxEl.remove();
+    anns.splice(anns.indexOf(a), 1);
+    if (editingN === a.n) editingN = null;
+    renderList();
+  }
   function deleteAnn(a) {
     // Recheck the hold here, not only in the render: a send reply can lock
     // this row while stale pre-lock controls — or an already-open confirm
     // dialog — are still live.
     if (isHeld(a)) return;
+    if (hasLiveDelivery(a)) {
+      if (typeof window.__FFB_WITHDRAW !== "function") { showToast("No server — can't withdraw this item", true); return; }
+      confirmDiscard("Delete annotation [" + a.n + "]? It is still pending for the AI and will be withdrawn. This can't be undone.", function () {
+        Promise.resolve(window.__FFB_WITHDRAW(a.progressId ? [a.progressId] : [], a.progressId ? [] : [a.id])).then(function (reply) {
+          var confirmed = a.progressId
+            ? (reply && reply.withdrawn || []).indexOf(a.progressId) !== -1
+            : (reply && reply.withdrawn_items || []).indexOf(a.id) !== -1;
+          // Unconfirmed means the AI already took it: keep the row so the
+          // eventual completion still lands somewhere visible.
+          if (!confirmed) { showToast("The AI already took this item — it will settle when the AI finishes", false); return; }
+          removeAnn(a);
+        }).catch(function () { showToast("Couldn't withdraw — item kept", true); });
+      }, "Cancel", "Discard");
+      return;
+    }
     confirmDiscard("Delete annotation [" + a.n + "]? This can't be undone.", function () {
       if (isHeld(a)) { showToast("The AI is working on this", false); renderList(); return; }
-      releaseAnchor(a);
-      if (a.boxEl) a.boxEl.remove();
-      anns.splice(anns.indexOf(a), 1);
-      if (editingN === a.n) editingN = null;
-      renderList();
+      removeAnn(a);
     }, "Cancel", "Discard");
   }
   form.querySelector("#__ffb_fsubmit").onclick = submitForm;
@@ -900,7 +921,7 @@
     if (activeListTab === "live") {
       var liveCopy = add("Copy", function () { copyTextAndFlash(buildExport(), liveCopy); });
       var clearButton = add("Clear", clearAll);
-      if (anns.some(isHeld)) { clearButton.disabled = true; clearButton.title = "The AI is working on this"; }
+      if (anns.some(hasLiveDelivery)) { clearButton.disabled = true; clearButton.title = "The AI is working on this"; }
       return;
     }
     if (historyDetailData && historyDetailData.id === historyDetailId) {
@@ -1219,13 +1240,15 @@
   // since it's destructive and the boxes can't be recovered. Numbering restarts
   // at [1] afterwards so a fresh pass reads cleanly.
   function clearAll() {
-    // isHeld, not isLocked: a completed row parked for its failed archive is
-    // the only visible record of that feedback — Clear must not erase it.
-    if (!anns.length || anns.some(isHeld)) return;
+    // hasLiveDelivery, not isLocked: a completed row parked for its failed
+    // archive is the only visible record of that feedback, and a stalled row
+    // still has live server-side work — Clear must erase neither. Delete
+    // handles stalled rows individually, with a confirmed withdrawal.
+    if (!anns.length || anns.some(hasLiveDelivery)) return;
     confirmDiscard("Clear all " + anns.length + " feedback item" + (anns.length > 1 ? "s" : "") + "? This can't be undone.", function () {
       // A send reply can lock rows while this dialog was open; rows the AI
       // now owns must survive the confirmation, like deleteAnn's recheck.
-      if (anns.some(isHeld)) { showToast("The AI is working on this", false); renderList(); return; }
+      if (anns.some(hasLiveDelivery)) { showToast("The AI is working on this", false); renderList(); return; }
       anns.forEach(function (a) { releaseAnchor(a); if (a.boxEl) a.boxEl.remove(); });
       anns = [];
       counter = 0;
