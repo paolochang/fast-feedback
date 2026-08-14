@@ -232,6 +232,36 @@ test("peek and count retain pending items until readAndClear consumes them", asy
   });
 });
 
+test("appendItems settles every write before rejecting", async () => {
+  await withInbox(async (dir) => {
+    const good = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", comment: "still lands" };
+    const bad = { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", comment: "collides" };
+    // A directory squatting on the second item's path makes its atomic
+    // rename fail; the first item's write must have settled by rejection time
+    // so the caller's reconciliation sees the true spool state.
+    await mkdir(join(dir, "pending"), { recursive: true });
+    await mkdir(join(dir, "pending", bad.id + ".json"));
+    await assert.rejects(appendItems([good, bad]));
+    await stat(join(dir, "pending", good.id + ".json"));
+  });
+});
+
+test("removePending withdraws an expired claim instead of reporting it delivered", async () => {
+  await withInbox(async (dir) => {
+    const itemId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    await appendItems([{ id: itemId, comment: "abandoned" }]);
+    // Simulate a pull that claimed the item and then died: the claim expires,
+    // recovery renames it to a random filename, and cancellation must still
+    // find the entry by its payload id.
+    const claimed = itemId + ".json.dddddddd-dddd-4ddd-8ddd-dddddddddddd.claimed";
+    await rename(join(dir, "pending", itemId + ".json"), join(dir, "pending", claimed));
+    const expired = new Date(Date.now() - 120000);
+    await utimes(join(dir, "pending", claimed), expired, expired);
+    assert.deepEqual(await removePending([itemId]), [itemId]);
+    assert.equal(await count(), 0);
+  });
+});
+
 test("readAndClear reports delivered items to its hook while peek does not", async () => {
   await withInbox(async () => {
     const progressId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
