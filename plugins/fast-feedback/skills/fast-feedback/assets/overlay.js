@@ -710,9 +710,11 @@
     var progressId = a.progressId;
     a.withdrawing = true;
     patchProgressChips();
-    Promise.resolve(window.__FFB_WITHDRAW([progressId], [])).then(function (reply) {
+    Promise.resolve(window.__FFB_WITHDRAW(progressId ? [progressId] : [], progressId ? [] : [a.id])).then(function (reply) {
       a.withdrawing = false;
-      var confirmed = (reply && reply.withdrawn || []).indexOf(progressId) !== -1;
+      var confirmed = progressId
+        ? (reply && reply.withdrawn || []).indexOf(progressId) !== -1
+        : (reply && reply.withdrawn_items || []).indexOf(a.id) !== -1;
       if (confirmed && a.progressId === progressId) { a.state = null; a.progressId = null; a.progressRevision = null; a.untracked = false; }
       else if (!confirmed) showToast("The AI already took the previous version — the edit sends after it settles", false);
       renderList();
@@ -1011,9 +1013,9 @@
             // Saved as a new revision: this row is fresh feedback now, not the
             // applied delivery — drop the completion marker so it can re-send.
             if (a.state === "completed") { a.state = null; a.progressRevision = null; }
-            // An edited stalled row still has its old delivery outstanding;
-            // withdraw it before the new revision may send.
-            if (a.state === "stalled" && a.progressId) withdrawSuperseded(a);
+            // An edited stalled row still has its old delivery outstanding —
+            // tracked or untracked; withdraw it before the new revision may send.
+            if (a.state === "stalled" && (a.progressId || a.untracked)) withdrawSuperseded(a);
           } else settleClosedEdit();
           editingN = null; renderList();
         };
@@ -1612,10 +1614,11 @@
       var a = entry.ann;
       return { id: entry.id, n: a.n, sel: a.sel, region: a.region, comment: a.comment, url: location.href, ts: new Date().toISOString() };
     });
-    // A row still carrying a progressId has an outstanding delivery (an
-    // edited stalled item whose withdrawal is unconfirmed): sending it now
-    // would strand that delivery's completion. It re-sends once settled.
-    var toSend = snapshot.filter(function (entry) { return !entry.ann.sentToInbox && !entry.ann.progressId; });
+    // A row still carrying a progressId (or the untracked flag) has an
+    // outstanding delivery — an edited stalled item whose withdrawal is
+    // unconfirmed. Sending it now would duplicate live work; it re-sends
+    // once that delivery settles or its withdrawal is confirmed.
+    var toSend = snapshot.filter(function (entry) { return !entry.ann.sentToInbox && !entry.ann.progressId && !entry.ann.untracked; });
     var toArchive = snapshot.filter(function (entry) { return entry.ann.archivedRevision !== entry.revision; });
     var basis = canSend && toSend.length ? currentRegionBasis() : null;
     var request;
