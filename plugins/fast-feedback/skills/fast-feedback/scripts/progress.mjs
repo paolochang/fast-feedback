@@ -122,16 +122,27 @@ export async function createQueued(entries, { now = Date.now } = {}) {
       const expired = Number.isFinite(observedMs)
         ? nowMs - observedMs > PROGRESS_GC_MS
         : nowMs - newestTimestamp(swept) > PROGRESS_UNOBSERVED_GC_MS;
-      if (expired) await rm(join(dir, name), { force: true });
+      // Best-effort: a sweep hiccup must not fail the send into untracked mode.
+      if (expired) { try { await rm(join(dir, name), { force: true }); } catch {} }
     }
     const created = [];
-    for (const record of records) {
-      const path = join(dir, record.progress_id + ".json");
-      // A delivery id is single-use. Even replacing another queued record could
-      // change which annotation and send timestamp a later completion belongs to.
-      if (await readRecord(path, record.progress_id)) continue;
-      await writeAtomically(path, JSON.stringify(record));
-      created.push(record.progress_id);
+    try {
+      for (const record of records) {
+        const path = join(dir, record.progress_id + ".json");
+        // A delivery id is single-use. Even replacing another queued record could
+        // change which annotation and send timestamp a later completion belongs to.
+        if (await readRecord(path, record.progress_id)) continue;
+        await writeAtomically(path, JSON.stringify(record));
+        created.push(record.progress_id);
+      }
+    } catch (error) {
+      // All-or-nothing: a partial batch would make the whole send untracked
+      // while the surviving records still accept completions the overlay
+      // would never poll. Roll back what this call created, then rethrow.
+      for (const id of created) {
+        try { await rm(join(dir, id + ".json"), { force: true }); } catch {}
+      }
+      throw error;
     }
     return created;
   });

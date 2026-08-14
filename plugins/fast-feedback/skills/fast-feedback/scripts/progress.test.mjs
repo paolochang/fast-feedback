@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -80,6 +80,17 @@ test("readStatuses derives stalled deadlines without persisting stalled", async 
     assert.equal((await readStatuses([SECOND], { now: () => 2001 + PROCESSING_STALL_MS }))[0].status, "stalled");
     assert.equal(JSON.parse(await readFile(join(dir, "progress", FIRST + ".json"), "utf8")).status, "queued");
     assert.equal(JSON.parse(await readFile(join(dir, "progress", SECOND + ".json"), "utf8")).status, "processing");
+  });
+});
+
+test("createQueued rolls back the batch when a later record cannot be written", async () => {
+  await withProgress(async (dir) => {
+    // A directory squatting on the second record's path makes its atomic
+    // rename fail after the first record was already written.
+    await mkdir(join(dir, "progress"), { recursive: true });
+    await mkdir(join(dir, "progress", SECOND + ".json"));
+    await assert.rejects(createQueued([queued(FIRST), queued(SECOND)]));
+    assert.deepEqual((await readdir(join(dir, "progress"))).filter((name) => name !== SECOND + ".json"), []);
   });
 });
 
