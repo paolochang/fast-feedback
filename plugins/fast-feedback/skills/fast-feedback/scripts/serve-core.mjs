@@ -239,10 +239,17 @@ export function handleFfbRoute(creq, cres, { port, mode = "static", id, inboxApi
         } catch (error) {
           // A partial publish would leave spool entries and queued records for
           // a batch the overlay will report as unsent. Reconcile before
-          // failing: pull back whatever is still pending and drop the
-          // now-orphaned queued records (the sweep only collects terminal ones).
-          try { await inboxApi.removePending(deliveries.map((item) => item.id).filter(Boolean)); } catch {}
-          if (tracked) { try { await progressApi.withdraw(deliveries.map((item) => item.progress_id)); } catch {} }
+          // failing: pull back whatever is still pending, then drop only the
+          // records proven orphaned by that removal — an item claimed by a
+          // pull before the removal is already delivered, and its record must
+          // survive for the agent's ffb_complete.
+          try {
+            const removed = new Set(await inboxApi.removePending(deliveries.map((item) => item.id).filter(Boolean)));
+            if (tracked) {
+              const orphaned = deliveries.filter((item) => removed.has(item.id)).map((item) => item.progress_id);
+              if (orphaned.length) { try { await progressApi.withdraw(orphaned); } catch {} }
+            }
+          } catch {}
           throw error;
         }
         // The batch is published and tracked; a count hiccup afterwards must

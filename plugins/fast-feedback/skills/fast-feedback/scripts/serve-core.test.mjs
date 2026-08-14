@@ -196,21 +196,30 @@ test("handleFfbRoute delivers feedback when queued progress cannot be written", 
   } finally { await new Promise((resolve) => server.close(resolve)); }
 });
 
-test("handleFfbRoute reconciles records and pending items when publication fails", async () => {
+test("handleFfbRoute reconciles publication failures but keeps records for claimed items", async () => {
+  const orphanItem = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const claimedItem = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  let queuedEntries;
   let removedPending;
   let withdrawnIds;
   const server = await startServer("test-session", {
-    progressApi: { createQueued: async () => {}, withdraw: async (ids) => { withdrawnIds = ids; } },
+    progressApi: {
+      createQueued: async (entries) => { queuedEntries = entries; },
+      withdraw: async (ids) => { withdrawnIds = ids; },
+    },
     inboxApi: {
       appendItems: async () => { throw new Error("disk full"); },
-      removePending: async (ids) => { removedPending = ids; return ids; },
+      // The claimed item lost the removal race: a pull already delivered it.
+      removePending: async (ids) => { removedPending = ids; return ids.filter((id) => id !== claimedItem); },
     },
   });
   try {
-    const response = await request({ port: server.address().port, headers: authorizedHeaders(server.address().port), body: JSON.stringify([{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }]) });
+    const response = await request({ port: server.address().port, headers: authorizedHeaders(server.address().port), body: JSON.stringify([{ id: orphanItem }, { id: claimedItem }]) });
     assert.equal(response.status, 500);
-    assert.deepEqual(removedPending, ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]);
-    assert.equal(withdrawnIds.length, 1);
+    assert.deepEqual(removedPending, [orphanItem, claimedItem]);
+    // Only the proven-orphaned record goes; the claimed item's record must
+    // survive for the agent's eventual ffb_complete.
+    assert.deepEqual(withdrawnIds, [queuedEntries.find((entry) => entry.item_id === orphanItem).progress_id]);
   } finally { await new Promise((resolve) => server.close(resolve)); }
 });
 
