@@ -241,7 +241,12 @@ test("appendItems settles every write before rejecting", async () => {
     // so the caller's reconciliation sees the true spool state.
     await mkdir(join(dir, "pending"), { recursive: true });
     await mkdir(join(dir, "pending", bad.id + ".json"));
-    await assert.rejects(appendItems([good, bad]));
+    await assert.rejects(appendItems([good, bad]), (error) => {
+      // The rejection reports which writes landed so the caller's
+      // reconciliation can tell published items from never-written ones.
+      assert.deepEqual(error.published, [good.id]);
+      return true;
+    });
     await stat(join(dir, "pending", good.id + ".json"));
   });
 });

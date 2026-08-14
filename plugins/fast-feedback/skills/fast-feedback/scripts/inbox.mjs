@@ -279,7 +279,13 @@ export async function appendItems(items) {
       JSON.stringify(item),
     )));
     const failed = results.find((result) => result.status === "rejected");
-    if (failed) throw failed.reason;
+    if (failed) {
+      // Tell the caller which items actually landed: its reconciliation needs
+      // to distinguish a published-then-claimed delivery from one that was
+      // never written at all.
+      failed.reason.published = normalizedItems.filter((item, index) => results[index].status === "fulfilled").map((item) => item.id);
+      throw failed.reason;
+    }
     try {
       await writeMirrors(dir, pendingDir);
     } catch (error) {

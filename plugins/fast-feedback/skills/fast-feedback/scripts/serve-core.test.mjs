@@ -223,6 +223,40 @@ test("handleFfbRoute reconciles publication failures but keeps records for claim
   } finally { await new Promise((resolve) => server.close(resolve)); }
 });
 
+test("handleFfbRoute returns partial tracking for deliveries that escape rollback", async () => {
+  const claimedItem = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const unwrittenItem = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  let queuedEntries;
+  let withdrawnIds;
+  const server = await startServer("test-session", {
+    progressApi: {
+      createQueued: async (entries) => { queuedEntries = entries; },
+      withdraw: async (ids) => { withdrawnIds = ids; },
+    },
+    inboxApi: {
+      // The claimed item's write landed before the failure; a pull then took
+      // it, so the reconciliation's removal finds nothing to pull back.
+      appendItems: async () => {
+        const failure = new Error("disk full");
+        failure.published = [claimedItem];
+        throw failure;
+      },
+      removePending: async () => [],
+      count: async () => 1,
+    },
+  });
+  try {
+    const response = await request({ port: server.address().port, headers: authorizedHeaders(server.address().port), body: JSON.stringify([{ id: claimedItem }, { id: unwrittenItem }]) });
+    assert.equal(response.status, 200);
+    const result = JSON.parse(response.body);
+    assert.equal(result.partial, true);
+    assert.deepEqual(result.items, [{ item_id: claimedItem, progress_id: queuedEntries.find((entry) => entry.item_id === claimedItem).progress_id }]);
+    // The never-written item's record is orphaned and withdrawn; the claimed
+    // delivery keeps its record for the agent's completion.
+    assert.deepEqual(withdrawnIds, [queuedEntries.find((entry) => entry.item_id === unwrittenItem).progress_id]);
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+});
+
 test("handleFfbRoute reports success with a null count when counting fails after publication", async () => {
   const server = await startServer("test-session", {
     progressApi: { createQueued: async () => {} },

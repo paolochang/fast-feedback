@@ -242,14 +242,32 @@ export function handleFfbRoute(creq, cres, { port, mode = "static", id, inboxApi
           // A partial publish would leave spool entries and queued records for
           // a batch the overlay will report as unsent. Reconcile before
           // failing: pull back whatever is still pending, then drop only the
-          // records proven orphaned by that removal — an item claimed by a
-          // pull before the removal is already delivered, and its record must
-          // survive for the agent's ffb_complete.
+          // records proven orphaned — pulled back, or never written at all
+          // (appendItems reports which writes landed). An item that was
+          // published but escaped removal was claimed by a pull: it is
+          // delivered, so hand its tracking back as a partial success instead
+          // of a blind 500 that would leave it retryable as a duplicate.
+          const published = Array.isArray(error?.published) ? new Set(error.published) : null;
           try {
             const removed = new Set(await inboxApi.removePending(deliveries.map((item) => item.id).filter(Boolean)));
             if (tracked) {
-              const orphaned = deliveries.filter((item) => removed.has(item.id)).map((item) => item.progress_id);
+              const orphaned = deliveries
+                .filter((item) => removed.has(item.id) || (published && item.id && !published.has(item.id)))
+                .map((item) => item.progress_id);
               if (orphaned.length) { try { await progressApi.withdraw(orphaned); } catch {} }
+            }
+            const escaped = published ? deliveries.filter((item) => published.has(item.id) && !removed.has(item.id)) : [];
+            if (escaped.length) {
+              let count = null;
+              try { count = await inboxApi.count(); } catch {}
+              sendJson(cres, 200, {
+                ok: false,
+                partial: true,
+                count,
+                progress: tracked,
+                items: escaped.map((item) => ({ item_id: item.id, progress_id: item.progress_id })),
+              });
+              return;
             }
           } catch {}
           throw error;

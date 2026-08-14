@@ -1542,6 +1542,7 @@
     var basis = canSend && toSend.length ? currentRegionBasis() : null;
     var request;
     var sentToInbox = false;
+    var partialSend = false;
     var archiveStarted = false;
     var flushUrl = location.href;   // freeze the URL at flush start (see capturePromise)
     sendInFlight = true;
@@ -1565,11 +1566,20 @@
     Promise.resolve(request).then(function (reply) {
       if (canSend && toSend.length) {
         sentToInbox = true;
+        // A partial reply means the server's rollback pulled some items back:
+        // only the deliveries it reports may lock — the rest stayed local and
+        // must remain retryable.
+        var deliveredIds = null;
+        if (reply && reply.partial === true) {
+          partialSend = true;
+          deliveredIds = {};
+          (reply.items || []).forEach(function (item) { deliveredIds[item.item_id] = true; });
+        }
         // Only mark the revision we actually sent as delivered. If the user edited
         // this annotation while the send was in flight (edit resets sentToInbox to
         // false and bumps revision), leave it unsent so the edited comment is
         // re-delivered to the inbox on the next flush.
-        toSend.forEach(function (entry) { if (entry.ann.revision === entry.revision) entry.ann.sentToInbox = true; });
+        toSend.forEach(function (entry) { if (entry.ann.revision === entry.revision && (!deliveredIds || deliveredIds[entry.id])) entry.ann.sentToInbox = true; });
         // Lock right here, before the archive below gets a chance to reject:
         // the items are already queued for the AI either way. A progress:false
         // reply carries IDs that have no records — storing one would let the
@@ -1581,6 +1591,7 @@
             // revision: the old delivery's progress must not claim (and later
             // settle away) the edited annotation. Leave it unlocked for re-send.
             if (entry.ann.revision !== entry.revision) return;
+            if (deliveredIds && !deliveredIds[entry.id]) return;
             var matches = reply && reply.progress !== false && reply.items ? reply.items.filter(function (item) { return item.item_id === entry.id; }) : [];
             entry.ann.state = "queued";
             entry.ann.progressId = matches.length ? matches[0].progress_id : null;
@@ -1638,7 +1649,10 @@
       updateHistoryCount();
       refreshHistoryCount();
       renderList();
-      showToast(handedOff ? "All items applied ✓" : outcome.toast, handedOff ? false : outcome.isError);
+      var toastText = outcome.toast, toastError = outcome.isError;
+      if (handedOff) { toastText = "All items applied ✓"; toastError = false; }
+      else if (partialSend) { toastText = "Some items didn't send — press Send to retry"; toastError = true; }
+      showToast(toastText, toastError);
       scheduleProgress();
     }).catch(function () {
       showToast(archiveStarted ? "Archive failed — items kept" : "Send failed — items kept", true);
