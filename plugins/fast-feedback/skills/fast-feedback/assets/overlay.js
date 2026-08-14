@@ -895,7 +895,7 @@
     if (activeListTab === "live") {
       var liveCopy = add("Copy", function () { copyTextAndFlash(buildExport(), liveCopy); });
       var clearButton = add("Clear", clearAll);
-      if (anns.some(isLocked)) { clearButton.disabled = true; clearButton.title = "The AI is working on this"; }
+      if (anns.some(isHeld)) { clearButton.disabled = true; clearButton.title = "The AI is working on this"; }
       return;
     }
     if (historyDetailData && historyDetailData.id === historyDetailId) {
@@ -1214,7 +1214,9 @@
   // since it's destructive and the boxes can't be recovered. Numbering restarts
   // at [1] afterwards so a fresh pass reads cleanly.
   function clearAll() {
-    if (!anns.length || anns.some(isLocked)) return;
+    // isHeld, not isLocked: a completed row parked for its failed archive is
+    // the only visible record of that feedback — Clear must not erase it.
+    if (!anns.length || anns.some(isHeld)) return;
     confirmDiscard("Clear all " + anns.length + " feedback item" + (anns.length > 1 ? "s" : "") + "? This can't be undone.", function () {
       anns.forEach(function (a) { releaseAnchor(a); if (a.boxEl) a.boxEl.remove(); });
       anns = [];
