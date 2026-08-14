@@ -131,6 +131,9 @@ test("send lock and edit save respect in-flight revisions", () => {
   // under an open editor; closing that editor finishes the settlement.
   assert.match(overlay, /a\.state === "completed" && a\.revision === a\.progressRevision && editingN !== a\.n/);
   assert.match(overlay, /var settleClosedEdit = function \(\) \{/);
+  // Closing the final completed editor lands the user in History, matching
+  // the all-completed path of settleProgress.
+  assert.match(overlay, /if \(!anns\.length\) \{ setListTab\("history"\); refreshHistoryCount\(\); showToast\("All items applied ✓", false\); \}/);
 });
 
 test("mid-edit renders keep the draft and cancel settles completed siblings", () => {

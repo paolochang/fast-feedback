@@ -922,6 +922,9 @@
           if (a.state === "completed" && a.revision === a.progressRevision) {
             releaseAnchor(a); if (a.boxEl) a.boxEl.remove();
             anns = anns.filter(function (other) { return other !== a; });
+            // If this was the last Live row, finish the batch the same way
+            // settleProgress would have: hand the user over to History.
+            if (!anns.length) { setListTab("history"); refreshHistoryCount(); showToast("All items applied ✓", false); }
           }
         };
         var save = function () {
