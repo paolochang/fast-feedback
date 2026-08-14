@@ -196,6 +196,39 @@ test("handleFfbRoute delivers feedback when queued progress cannot be written", 
   } finally { await new Promise((resolve) => server.close(resolve)); }
 });
 
+test("handleFfbRoute reconciles records and pending items when publication fails", async () => {
+  let removedPending;
+  let withdrawnIds;
+  const server = await startServer("test-session", {
+    progressApi: { createQueued: async () => {}, withdraw: async (ids) => { withdrawnIds = ids; } },
+    inboxApi: {
+      appendItems: async () => { throw new Error("disk full"); },
+      removePending: async (ids) => { removedPending = ids; return ids; },
+    },
+  });
+  try {
+    const response = await request({ port: server.address().port, headers: authorizedHeaders(server.address().port), body: JSON.stringify([{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }]) });
+    assert.equal(response.status, 500);
+    assert.deepEqual(removedPending, ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]);
+    assert.equal(withdrawnIds.length, 1);
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+});
+
+test("handleFfbRoute reports success with a null count when counting fails after publication", async () => {
+  const server = await startServer("test-session", {
+    progressApi: { createQueued: async () => {} },
+    inboxApi: { appendItems: async () => {}, count: async () => { throw new Error("count unavailable"); } },
+  });
+  try {
+    const response = await request({ port: server.address().port, headers: authorizedHeaders(server.address().port), body: JSON.stringify([{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }]) });
+    assert.equal(response.status, 200);
+    const result = JSON.parse(response.body);
+    assert.equal(result.ok, true);
+    assert.equal(result.count, null);
+    assert.equal(result.progress, true);
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+});
+
 test("handleFfbRoute refuses delivery when the progress rollback is dirty", async () => {
   let appended = false;
   const dirty = new Error("progress rollback incomplete");

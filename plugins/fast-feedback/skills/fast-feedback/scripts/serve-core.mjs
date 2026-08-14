@@ -234,10 +234,24 @@ export function handleFfbRoute(creq, cres, { port, mode = "static", id, inboxApi
           if (error?.code === "FFB_PROGRESS_DIRTY") throw error;
           tracked = false;
         }
-        await inboxApi.appendItems(deliveries);
+        try {
+          await inboxApi.appendItems(deliveries);
+        } catch (error) {
+          // A partial publish would leave spool entries and queued records for
+          // a batch the overlay will report as unsent. Reconcile before
+          // failing: pull back whatever is still pending and drop the
+          // now-orphaned queued records (the sweep only collects terminal ones).
+          try { await inboxApi.removePending(deliveries.map((item) => item.id).filter(Boolean)); } catch {}
+          if (tracked) { try { await progressApi.withdraw(deliveries.map((item) => item.progress_id)); } catch {} }
+          throw error;
+        }
+        // The batch is published and tracked; a count hiccup afterwards must
+        // not report the whole send as failed.
+        let count = null;
+        try { count = await inboxApi.count(); } catch {}
         sendJson(cres, 200, {
           ok: true,
-          count: await inboxApi.count(),
+          count,
           progress: tracked,
           items: deliveries.map((item) => ({ item_id: item.id, progress_id: item.progress_id })),
         });
