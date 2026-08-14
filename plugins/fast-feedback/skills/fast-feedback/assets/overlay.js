@@ -716,7 +716,10 @@
       if (confirmed && a.progressId === progressId) { a.state = null; a.progressId = null; a.progressRevision = null; a.untracked = false; }
       else if (!confirmed) showToast("The AI already took the previous version — the edit sends after it settles", false);
       renderList();
-    }).catch(function () { a.withdrawing = false; renderList(); });
+      // The watch loop may have died while this row was excluded from it;
+      // restart it so an unconfirmed delivery's completion is still observed.
+      scheduleProgress();
+    }).catch(function () { a.withdrawing = false; renderList(); scheduleProgress(); });
   }
   function deleteAnn(a) {
     // Recheck the hold here, not only in the render: a send reply can lock
@@ -738,14 +741,16 @@
             ? (reply && reply.withdrawn || []).indexOf(progressId) !== -1
             : (reply && reply.withdrawn_items || []).indexOf(a.id) !== -1;
           // Unconfirmed means the AI already took it: keep the row so the
-          // eventual completion still lands somewhere visible.
-          if (!confirmed) { showToast("The AI already took this item — it will settle when the AI finishes", false); patchProgressChips(); return; }
+          // eventual completion still lands somewhere visible. Restart the
+          // watch loop — it may have died while this row was excluded.
+          if (!confirmed) { showToast("The AI already took this item — it will settle when the AI finishes", false); patchProgressChips(); scheduleProgress(); return; }
           // Remove only the delivery we actually withdrew. A null progressId
           // is fine — a poll that raced the withdrawal may have read "unknown"
           // and released the handle; the revision pin still identifies the row.
-          if (anns.indexOf(a) === -1 || a.revision !== revision || (a.progressId !== null && a.progressId !== progressId)) { renderList(); return; }
+          if (anns.indexOf(a) === -1 || a.revision !== revision || (a.progressId !== null && a.progressId !== progressId)) { renderList(); scheduleProgress(); return; }
           removeAnn(a);
-        }).catch(function () { a.withdrawing = false; showToast("Couldn't withdraw — item kept", true); patchProgressChips(); });
+          scheduleProgress();
+        }).catch(function () { a.withdrawing = false; showToast("Couldn't withdraw — item kept", true); patchProgressChips(); scheduleProgress(); });
       }, "Cancel", "Discard");
       return;
     }
