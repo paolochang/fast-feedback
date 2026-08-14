@@ -135,7 +135,9 @@ installed. It provides four tools:
   included when the server is not running.
 
 For the **watch loop** (review mode), call `ffb_wait`, apply the returned
-feedback, then call `ffb_wait` again to re-arm it. For clients that do not support
+feedback, then call `ffb_wait` again to re-arm it. In Claude Code, prefer the
+**background watcher** (next section) — it survives turn boundaries, which
+`ffb_wait` does not. For clients that do not support
 long-polling, call `ffb_pull` once when the user says they sent feedback. Codex
 and Cursor need a one-time `mcp add` registration for this server; they do not
 need to add it for each use.
@@ -146,6 +148,29 @@ When empty, `ffb_peek` returns `[]` on the first line followed by a pointer to
 `ffb_status`, so the full response is no longer JSON-parseable. `ffb_pull` and
 `ffb_wait` retain `no pending feedback` and `none yet` respectively, with the
 same pointer appended.
+
+#### Waking the session on Send (Claude Code)
+
+MCP tools are pull-only: an idle session does not notice a Send on its own, and
+`ffb_wait` only waits inside one tool call (~100s). In Claude Code, arm the
+**background watcher** instead — it blocks until feedback is pending, then
+exits, and the background-task completion notification wakes the session:
+
+1. After starting the file/live server, run in the background (Bash
+   `run_in_background`): `node <skill>/scripts/watch-inbox.mjs` — from the
+   project root, or with `FFB_INBOX` set to the same inbox as the server.
+2. On the completion notification: call `ffb_pull` (**an empty pull is
+   normal** — another consumer may have taken the items), then apply the items.
+3. **Whatever happened, the last step is always re-arming the watcher** by
+   running it again. Exit `0` = feedback was pending → pull, apply, re-arm.
+   Exit `2` = 12h lifetime expired → just re-arm. Any other exit = watcher
+   error → re-arm, and mention it to the user if it repeats.
+
+The watcher never consumes the spool — delivery stays on `ffb_pull`/`ffb_wait`.
+Clients without background-task notifications (and any harness where a
+background exit does not wake the session) keep using the `ffb_wait` watch loop
+above. In console/bookmarklet mode there is nothing to watch — no server, no
+spool.
 
 Limits (be honest): the proxy is built for **local dev servers** you're working
 on. An **https** dev server needs a local cert — start it on http for the review,
