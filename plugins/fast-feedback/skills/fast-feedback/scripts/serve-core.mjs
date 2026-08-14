@@ -70,7 +70,7 @@ const historyReadFns = "window.__FFB_HISTORY_LIST=function(){return fetch('/__ff
 // progress routes take per request, and an unchunked oversized batch could
 // neither be polled nor cancelled.
 const progressFns = "window.__FFB_PROGRESS=function(ids){var parts=[];for(var i=0;i<ids.length;i+=" + MAX_PROGRESS_IDS + ")parts.push(ids.slice(i,i+" + MAX_PROGRESS_IDS + "));return Promise.all(parts.map(function(part){return fetch('/__ffb__/progress?ids='+encodeURIComponent(part.join(',')),{headers:{'x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "}}).then(function(r){if(!r.ok)throw new Error('Progress request failed: '+r.status);return r.json();});})).then(function(replies){return {items:replies.reduce(function(all,reply){return all.concat(reply&&reply.items||[]);},[])};});};" +
-  "window.__FFB_WITHDRAW=function(ids){var parts=[];for(var i=0;i<ids.length;i+=" + MAX_PROGRESS_IDS + ")parts.push(ids.slice(i,i+" + MAX_PROGRESS_IDS + "));return Promise.all(parts.map(function(part){return fetch('/__ffb__/withdraw',{method:'POST',headers:{'content-type':'application/json','x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "},body:JSON.stringify({ids:part})}).then(function(r){if(!r.ok)throw new Error('Withdraw failed: '+r.status);return r.json();});})).then(function(replies){return replies.reduce(function(all,reply){return {withdrawn:all.withdrawn.concat(reply&&reply.withdrawn||[]),already_delivered:all.already_delivered.concat(reply&&reply.already_delivered||[])};},{withdrawn:[],already_delivered:[]});});};";
+  "window.__FFB_WITHDRAW=function(ids,itemIds){var bodies=[];var i;for(i=0;i<ids.length;i+=" + MAX_PROGRESS_IDS + ")bodies.push({ids:ids.slice(i,i+" + MAX_PROGRESS_IDS + ")});itemIds=itemIds||[];for(i=0;i<itemIds.length;i+=" + MAX_PROGRESS_IDS + ")bodies.push({item_ids:itemIds.slice(i,i+" + MAX_PROGRESS_IDS + ")});return Promise.all(bodies.map(function(body){return fetch('/__ffb__/withdraw',{method:'POST',headers:{'content-type':'application/json','x-ffb-token':" + JSON.stringify(FFB_SEND_TOKEN) + "},body:JSON.stringify(body)}).then(function(r){if(!r.ok)throw new Error('Withdraw failed: '+r.status);return r.json();});})).then(function(replies){return replies.reduce(function(all,reply){return {withdrawn:all.withdrawn.concat(reply&&reply.withdrawn||[]),already_delivered:all.already_delivered.concat(reply&&reply.already_delivered||[]),withdrawn_items:all.withdrawn_items.concat(reply&&reply.withdrawn_items||[])};},{withdrawn:[],already_delivered:[],withdrawn_items:[]});});};";
 
 export function renderBoot({ fileLabel }) {
   const overlay = readFileSync(overlayPath, "utf8");
@@ -277,8 +277,13 @@ export function handleFfbRoute(creq, cres, { port, mode = "static", id, inboxApi
     creq.on("end", async () => {
       if (tooLarge) return;
       let ids;
+      let itemIds;
       try {
-        ids = JSON.parse(Buffer.concat(chunks).toString("utf8"))?.ids;
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        ids = body?.ids ?? [];
+        // Untracked deliveries have no progress record, so the overlay cancels
+        // them by the item id it does know; confirmation comes back the same way.
+        itemIds = body?.item_ids ?? [];
       } catch {
         sendJson(cres, 400, { error: "invalid JSON" });
         return;
@@ -287,12 +292,17 @@ export function handleFfbRoute(creq, cres, { port, mode = "static", id, inboxApi
         sendJson(cres, 400, { error: "progress ids must be UUIDs" });
         return;
       }
+      if (!Array.isArray(itemIds) || itemIds.length > MAX_PROGRESS_IDS || itemIds.some((value) => !history.isUuid(value))) {
+        sendJson(cres, 400, { error: "item ids must be UUIDs" });
+        return;
+      }
       try {
-        const records = await progressApi.readStatuses(ids);
+        const records = ids.length ? await progressApi.readStatuses(ids) : [];
         // A queued record may be displayed as stalled after its deadline; a
         // missing claimed timestamp still identifies it as pending and safe to cancel.
         const queued = records.filter((record) => (record.status === "queued" || (record.status === "stalled" && !record.claimed_at)) && record.item_id);
-        const removedItemIds = new Set(await inboxApi.removePending(queued.map((record) => record.item_id)));
+        const targets = [...new Set([...queued.map((record) => record.item_id), ...itemIds])];
+        const removedItemIds = new Set(targets.length ? await inboxApi.removePending(targets) : []);
         const withdrawn = queued.filter((record) => removedItemIds.has(record.item_id)).map((record) => record.progress_id);
         const withdrawnSet = new Set(withdrawn);
         // Delete only records that are done with: cancelled deliveries and
@@ -300,7 +310,11 @@ export function handleFfbRoute(creq, cres, { port, mode = "static", id, inboxApi
         // ffb_complete can still settle the delivery it belongs to.
         const disposable = withdrawn.concat(records.filter((record) => record.status === "completed" || record.status === "failed").map((record) => record.progress_id));
         if (disposable.length) await progressApi.withdraw(disposable);
-        sendJson(cres, 200, { withdrawn, already_delivered: ids.filter((progressId) => !withdrawnSet.has(progressId)) });
+        sendJson(cres, 200, {
+          withdrawn,
+          already_delivered: ids.filter((progressId) => !withdrawnSet.has(progressId)),
+          withdrawn_items: itemIds.filter((itemId) => removedItemIds.has(itemId)),
+        });
       } catch {
         sendJson(cres, 500, { error: "could not withdraw feedback" });
       }

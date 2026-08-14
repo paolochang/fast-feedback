@@ -121,6 +121,14 @@ test("a second flush with nothing new produces the already-sent outcome", async 
   assert.equal(flush.inFlight, 1);
 });
 
+test("send lock and edit save respect in-flight revisions", () => {
+  const overlay = readFileSync(new URL("../assets/overlay.js", import.meta.url), "utf8");
+  // The lock loop must skip entries edited while the send was in flight, and
+  // the edit form must refuse to mutate an annotation the lock already claimed.
+  assert.match(overlay, /if \(entry\.ann\.revision !== entry\.revision\) return;/);
+  assert.match(overlay, /if \(isHeld\(a\)\) \{ showToast\("The AI is working on this — wait for it to settle", true\); return; \}/);
+});
+
 test("console mode does not enable progress UI", () => {
   const overlay = readFileSync(new URL("../assets/overlay.js", import.meta.url), "utf8");
   assert.match(overlay, /var progressCapable = typeof window\.__FFB_PROGRESS === "function";/);

@@ -215,6 +215,8 @@ test("handleFfbRoute withdraws queued spool items but keeps processing records",
   const queued = "11111111-1111-4111-8111-111111111111";
   const processing = "22222222-2222-4222-8222-222222222222";
   const completed = "33333333-3333-4333-8333-333333333333";
+  const untrackedItem = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const claimedItem = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
   let removedItemIds;
   let deletedIds;
   const server = await startServer("test-session", {
@@ -226,14 +228,18 @@ test("handleFfbRoute withdraws queued spool items but keeps processing records",
       ],
       withdraw: async (ids) => { deletedIds = ids; },
     },
-    inboxApi: { removePending: async (ids) => { removedItemIds = ids; return ids; } },
+    inboxApi: { removePending: async (ids) => { removedItemIds = ids; return ids.filter((id) => id !== claimedItem); } },
   });
   try {
-    const response = await request({ port: server.address().port, path: "/__ffb__/withdraw?overlay=1", headers: authorizedHeaders(server.address().port), body: JSON.stringify({ ids: [queued, processing, completed] }) });
+    const response = await request({ port: server.address().port, path: "/__ffb__/withdraw?overlay=1", headers: authorizedHeaders(server.address().port), body: JSON.stringify({ ids: [queued, processing, completed], item_ids: [untrackedItem, claimedItem] }) });
     assert.equal(response.status, 200);
-    assert.deepEqual(removedItemIds, ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]);
+    assert.deepEqual(removedItemIds, ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", untrackedItem, claimedItem]);
     assert.deepEqual(deletedIds, [queued, completed]);
-    assert.deepEqual(JSON.parse(response.body), { withdrawn: [queued], already_delivered: [processing, completed] });
+    assert.deepEqual(JSON.parse(response.body), {
+      withdrawn: [queued],
+      already_delivered: [processing, completed],
+      withdrawn_items: [untrackedItem],
+    });
   } finally { await new Promise((resolve) => server.close(resolve)); }
 });
 
@@ -253,7 +259,7 @@ test("renderBoot's progress helpers chunk oversized id batches and merge replies
   const calls = [];
   const helpers = bootHelpers(async (url, options = {}) => {
     calls.push({ url, options });
-    return { ok: true, json: async () => ({ items: ["polled"], withdrawn: ["gone"], already_delivered: ["kept"] }) };
+    return { ok: true, json: async () => ({ items: ["polled"], withdrawn: ["gone"], already_delivered: ["kept"], withdrawn_items: ["freed"] }) };
   });
   const progress = await helpers.__FFB_PROGRESS(ids);
   assert.equal(calls.length, 3);
@@ -261,10 +267,17 @@ test("renderBoot's progress helpers chunk oversized id batches and merge replies
   // JSON round-trips normalize objects built inside the boot script's vm context.
   assert.deepEqual(JSON.parse(JSON.stringify(progress)), { items: ["polled", "polled", "polled"] });
   calls.length = 0;
-  const withdrawal = await helpers.__FFB_WITHDRAW(ids);
-  assert.equal(calls.length, 3);
-  assert.ok(calls.every(({ options }) => JSON.parse(options.body).ids.length <= 100));
-  assert.deepEqual(JSON.parse(JSON.stringify(withdrawal)), { withdrawn: ["gone", "gone", "gone"], already_delivered: ["kept", "kept", "kept"] });
+  const withdrawal = await helpers.__FFB_WITHDRAW(ids, ids);
+  assert.equal(calls.length, 6);
+  assert.ok(calls.every(({ options }) => {
+    const body = JSON.parse(options.body);
+    return (body.ids || body.item_ids).length <= 100 && !(body.ids && body.item_ids);
+  }));
+  assert.deepEqual(JSON.parse(JSON.stringify(withdrawal)), {
+    withdrawn: Array(6).fill("gone"),
+    already_delivered: Array(6).fill("kept"),
+    withdrawn_items: Array(6).fill("freed"),
+  });
 });
 
 test("renderBoot's send helper resolves to the parsed send reply", async () => {

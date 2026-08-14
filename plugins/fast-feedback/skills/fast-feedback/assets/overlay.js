@@ -912,7 +912,13 @@
         setTimeout(function () { ta.focus(); }, 0);
         var save = function () {
           var comment = ta.value.trim();
-          if (comment !== a.comment) { a.comment = comment; a.sentToInbox = false; a.revision++; }
+          if (comment !== a.comment) {
+            // A send reply can lock this item while the form is still open;
+            // mutating it then would orphan the delivery's tracking. Keep the
+            // form (and the typed text) until the item settles.
+            if (isHeld(a)) { showToast("The AI is working on this — wait for it to settle", true); return; }
+            a.comment = comment; a.sentToInbox = false; a.revision++;
+          }
           editingN = null; renderList();
         };
         var closeEdit = function () {
@@ -1417,19 +1423,24 @@
   function cancelBatch() {
     var batch = anns.filter(function (a) { return isLocked(a); });
     var ids = batch.filter(function (a) { return a.progressId; }).map(function (a) { return a.progressId; });
+    var itemIds = batch.filter(function (a) { return !a.progressId; }).map(function (a) { return a.id; });
     if (typeof window.__FFB_WITHDRAW !== "function") return;
-    Promise.resolve(window.__FFB_WITHDRAW(ids)).then(function (reply) {
-      // Unlock only what the server actually pulled back (plus untracked items
-      // it can't know about). Claimed work stays locked and tracked so its
-      // eventual completion still lands on the card.
+    Promise.resolve(window.__FFB_WITHDRAW(ids, itemIds)).then(function (reply) {
+      // Unlock only what the server confirmed it pulled back — by progress ID
+      // for tracked items, by item ID for untracked ones. Anything already
+      // claimed stays locked (and, when tracked, polled) so its eventual
+      // completion still lands on the card instead of enabling a duplicate send.
       var withdrawnIds = reply && reply.withdrawn ? reply.withdrawn : [];
+      var withdrawnItems = reply && reply.withdrawn_items ? reply.withdrawn_items : [];
+      var cancelled = 0;
       batch.forEach(function (a) {
-        if (a.progressId && withdrawnIds.indexOf(a.progressId) === -1) return;
+        if (a.progressId ? withdrawnIds.indexOf(a.progressId) === -1 : withdrawnItems.indexOf(a.id) === -1) return;
+        cancelled++;
         a.state = null; a.progressId = null; a.untracked = false; a.sentToInbox = false;
       });
       progressFailures = 0; renderList();
-      var missed = reply && reply.already_delivered ? reply.already_delivered.length : 0;
-      showToast(withdrawnIds.length + " withdrawn" + (missed ? " · " + missed + " couldn't be cancelled" : ""), false);
+      var missed = batch.length - cancelled;
+      showToast(cancelled + " withdrawn" + (missed ? " · " + missed + " couldn't be cancelled" : ""), false);
       scheduleProgress();
     }).catch(function () { showToast("Cancel failed · items kept", true); });
   }
@@ -1515,6 +1526,10 @@
         if (progressCapable) {
           editingN = null;
           toSend.forEach(function (entry) {
+            // An edit that landed while the send was in flight bumped the
+            // revision: the old delivery's progress must not claim (and later
+            // settle away) the edited annotation. Leave it unlocked for re-send.
+            if (entry.ann.revision !== entry.revision) return;
             var matches = reply && reply.progress !== false && reply.items ? reply.items.filter(function (item) { return item.item_id === entry.id; }) : [];
             entry.ann.state = "queued";
             entry.ann.progressId = matches.length ? matches[0].progress_id : null;
