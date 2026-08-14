@@ -701,6 +701,23 @@
     if (editingN === a.n) editingN = null;
     renderList();
   }
+  // An edited stalled row supersedes its outstanding delivery. Withdraw the
+  // old delivery so the new revision may send; if the AI already claimed it
+  // (unconfirmed), the row stays tracked and non-sendable until that work
+  // settles — settlement releases it for re-send.
+  function withdrawSuperseded(a) {
+    if (typeof window.__FFB_WITHDRAW !== "function") return;
+    var progressId = a.progressId;
+    a.withdrawing = true;
+    patchProgressChips();
+    Promise.resolve(window.__FFB_WITHDRAW([progressId], [])).then(function (reply) {
+      a.withdrawing = false;
+      var confirmed = (reply && reply.withdrawn || []).indexOf(progressId) !== -1;
+      if (confirmed && a.progressId === progressId) { a.state = null; a.progressId = null; a.progressRevision = null; a.untracked = false; }
+      else if (!confirmed) showToast("The AI already took the previous version — the edit sends after it settles", false);
+      renderList();
+    }).catch(function () { a.withdrawing = false; renderList(); });
+  }
   function deleteAnn(a) {
     // Recheck the hold here, not only in the render: a send reply can lock
     // this row while stale pre-lock controls — or an already-open confirm
@@ -989,6 +1006,9 @@
             // Saved as a new revision: this row is fresh feedback now, not the
             // applied delivery — drop the completion marker so it can re-send.
             if (a.state === "completed") { a.state = null; a.progressRevision = null; }
+            // An edited stalled row still has its old delivery outstanding;
+            // withdraw it before the new revision may send.
+            if (a.state === "stalled" && a.progressId) withdrawSuperseded(a);
           } else settleClosedEdit();
           editingN = null; renderList();
         };
@@ -1587,7 +1607,10 @@
       var a = entry.ann;
       return { id: entry.id, n: a.n, sel: a.sel, region: a.region, comment: a.comment, url: location.href, ts: new Date().toISOString() };
     });
-    var toSend = snapshot.filter(function (entry) { return !entry.ann.sentToInbox; });
+    // A row still carrying a progressId has an outstanding delivery (an
+    // edited stalled item whose withdrawal is unconfirmed): sending it now
+    // would strand that delivery's completion. It re-sends once settled.
+    var toSend = snapshot.filter(function (entry) { return !entry.ann.sentToInbox && !entry.ann.progressId; });
     var toArchive = snapshot.filter(function (entry) { return entry.ann.archivedRevision !== entry.revision; });
     var basis = canSend && toSend.length ? currentRegionBasis() : null;
     var request;

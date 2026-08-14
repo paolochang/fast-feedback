@@ -172,6 +172,10 @@ test("progress scheduling requires a tracked annotation and tracking includes st
   assert.match(overlay, /function watchesProgress\(a\) \{ return isTracked\(a\) \|\| \(isLocked\(a\) && a\.untracked\); \}/);
   // Destructive actions gate on live server-side work, not just the lock.
   assert.match(overlay, /function hasLiveDelivery\(a\) \{ return isHeld\(a\) \|\| \(a\.state === "stalled" && \(a\.progressId \|\| a\.untracked \|\| a\.sentToInbox\)\); \}/);
+  // An edited stalled row withdraws its outstanding delivery, and rows still
+  // carrying a progressId never enter a new send.
+  assert.match(overlay, /function withdrawSuperseded\(a\) \{/);
+  assert.match(overlay, /var toSend = snapshot\.filter\(function \(entry\) \{ return !entry\.ann\.sentToInbox && !entry\.ann\.progressId; \}\);/);
 });
 
 async function waitFor(predicate) {
