@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rmdir, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rmdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { appendItems, count, inboxPath, peek, readAndClear, readSessions, withLock, writeSession } from "./inbox.mjs";
+import { appendItems, count, inboxPath, peek, readAndClear, readSessions, removePending, withLock, writeSession } from "./inbox.mjs";
+import { createQueued, markProcessing, readStatuses } from "./progress.mjs";
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -228,6 +229,170 @@ test("peek and count retain pending items until readAndClear consumes them", asy
     assert.deepEqual(await readAndClear(), []);
     assert.equal(await readFile(join(dir, "inbox.jsonl"), "utf8"), "");
     assert.equal(await readFile(join(dir, "inbox.md"), "utf8"), "(no feedback yet)\n");
+  });
+});
+
+test("appendItems settles every write before rejecting", async () => {
+  await withInbox(async (dir) => {
+    const good = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", comment: "still lands" };
+    const bad = { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", comment: "collides" };
+    // A directory squatting on the second item's path makes its atomic
+    // rename fail; the first item's write must have settled by rejection time
+    // so the caller's reconciliation sees the true spool state.
+    await mkdir(join(dir, "pending"), { recursive: true });
+    await mkdir(join(dir, "pending", bad.id + ".json"));
+    await assert.rejects(appendItems([good, bad]), (error) => {
+      // The rejection reports which writes landed so the caller's
+      // reconciliation can tell published items from never-written ones.
+      assert.deepEqual(error.published, [good.id]);
+      return true;
+    });
+    await stat(join(dir, "pending", good.id + ".json"));
+  });
+});
+
+test("removePending withdraws an expired claim instead of reporting it delivered", async () => {
+  await withInbox(async (dir) => {
+    const itemId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    await appendItems([{ id: itemId, comment: "abandoned" }]);
+    // Simulate a pull that claimed the item and then died: the claim expires,
+    // recovery renames it to a random filename, and cancellation must still
+    // find the entry by its payload id.
+    const claimed = itemId + ".json.dddddddd-dddd-4ddd-8ddd-dddddddddddd.claimed";
+    await rename(join(dir, "pending", itemId + ".json"), join(dir, "pending", claimed));
+    const expired = new Date(Date.now() - 120000);
+    await utimes(join(dir, "pending", claimed), expired, expired);
+    assert.deepEqual(await removePending([itemId]), [itemId]);
+    assert.equal(await count(), 0);
+  });
+});
+
+test("removePending reports proven removals even when another entry cannot be removed", async () => {
+  await withInbox(async (dir) => {
+    const stuck = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const fine = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const errors = [];
+    const originalError = console.error;
+    console.error = (error) => errors.push(error);
+    try {
+      await appendItems([{ id: fine, comment: "removable" }]);
+      // A directory squatting on the stuck item's path makes its rm fail with
+      // a non-ENOENT error; the proven removal must still be reported.
+      await mkdir(join(dir, "pending", stuck + ".json"));
+      assert.deepEqual(await removePending([stuck, fine]), [fine]);
+      assert.ok(errors.length >= 1);
+    } finally {
+      console.error = originalError;
+    }
+  });
+});
+
+test("removePending withholds an id while one of its copies cannot be removed", async () => {
+  await withInbox(async (dir) => {
+    const itemId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const errors = [];
+    const originalError = console.error;
+    console.error = (error) => errors.push(error);
+    try {
+      await appendItems([{ id: itemId, comment: "duplicate" }]);
+      // Move the payload to a recovered-style random name, then squat the
+      // canonical path with a directory so its rm fails: one copy of the id
+      // is removable, the other is not — the id must not be reported.
+      await rename(join(dir, "pending", itemId + ".json"), join(dir, "pending", "cccccccc-cccc-4ccc-8ccc-cccccccccccc.json"));
+      await mkdir(join(dir, "pending", itemId + ".json"));
+      assert.deepEqual(await removePending([itemId]), []);
+      assert.ok(errors.length >= 1);
+    } finally {
+      console.error = originalError;
+    }
+  });
+});
+
+test("removePending clears recovered duplicates alongside a canonical resend", async () => {
+  await withInbox(async (dir) => {
+    const itemId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    await appendItems([{ id: itemId, comment: "old revision" }]);
+    // A recovered abandoned claim keeps the old revision under a random
+    // filename while a resend recreates the canonical one.
+    await rename(join(dir, "pending", itemId + ".json"), join(dir, "pending", "cccccccc-cccc-4ccc-8ccc-cccccccccccc.json"));
+    await appendItems([{ id: itemId, comment: "new revision" }]);
+    assert.equal(await count(), 2);
+    assert.deepEqual(await removePending([itemId]), [itemId]);
+    assert.equal(await count(), 0);
+  });
+});
+
+test("readAndClear reports delivered items to its hook while peek does not", async () => {
+  await withInbox(async () => {
+    const progressId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const itemId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const legacy = { comment: "no progress record" };
+    const tracked = { id: itemId, comment: "mark me", progress_id: progressId };
+    const calls = [];
+    // A fresh timestamp keeps the record inside both the stall deadline and
+    // the PROGRESS_GC_MS window regardless of when the suite runs.
+    await createQueued([{ progress_id: progressId, item_id: itemId, sent_at: new Date().toISOString() }]);
+    await appendItems([legacy, tracked]);
+
+    assert.equal((await peek()).length, 2);
+    assert.deepEqual(calls, []);
+    assert.equal((await readStatuses([progressId]))[0].status, "queued");
+
+    const delivered = await readAndClear({ onDelivered: async (items) => {
+      calls.push(items);
+      await markProcessing(items.flatMap((item) => item.progress_id ? [item.progress_id] : []));
+      assert.deepEqual(items.map(({ comment }) => comment).sort(), ["mark me", "no progress record"]);
+    } });
+
+    assert.deepEqual(calls, [delivered]);
+    assert.deepEqual(delivered.map(({ comment }) => comment).sort(), ["mark me", "no progress record"]);
+    const [status] = await readStatuses([progressId]);
+    assert.equal(status.status, "processing");
+    assert.ok(Number.isFinite(Date.parse(status.claimed_at)));
+  });
+});
+
+test("readAndClear logs a delivery hook failure without losing feedback", async () => {
+  await withInbox(async () => {
+    const item = { comment: "still delivered", progress_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" };
+    const errors = [];
+    const originalError = console.error;
+    console.error = (error) => errors.push(error);
+    try {
+      await appendItems([item]);
+      const delivered = await readAndClear({ onDelivered: async () => { throw new Error("progress unavailable"); } });
+      assert.deepEqual(delivered.map(({ id, ...entry }) => entry), [item]);
+      assert.equal(await count(), 0);
+      assert.equal(errors.length, 1);
+      assert.match(errors[0].message, /progress unavailable/);
+    } finally {
+      console.error = originalError;
+    }
+  });
+});
+
+test("removePending removes only pending annotation ids and refreshes mirrors", async () => {
+  await withInbox(async (dir) => {
+    const firstId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const secondId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const absentId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    await appendItems([{ id: firstId, comment: "cancel" }, { id: secondId, comment: "keep" }]);
+
+    assert.deepEqual(await removePending([firstId, absentId]), [firstId]);
+    assert.deepEqual(await peek(), [{ id: secondId, comment: "keep" }]);
+    assert.equal(await readFile(join(dir, "inbox.jsonl"), "utf8"), JSON.stringify({ id: secondId, comment: "keep" }) + "\n");
+    assert.match(await readFile(join(dir, "inbox.md"), "utf8"), /keep/);
+    assert.deepEqual(await removePending([firstId]), []);
+  });
+});
+
+test("removePending reports an already claimed item as not removed", async () => {
+  await withInbox(async (dir) => {
+    const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    await appendItems([{ id, comment: "claimed" }]);
+    await rename(join(dir, "pending", id + ".json"), join(dir, "pending", id + ".json.bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.claimed"));
+
+    assert.deepEqual(await removePending([id]), []);
   });
 });
 

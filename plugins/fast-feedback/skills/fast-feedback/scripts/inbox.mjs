@@ -271,10 +271,21 @@ export async function appendItems(items) {
   const { dir, pendingDir } = await ensureInbox();
   const normalizedItems = items.map(normalizeItem);
   await withLock(dir, async () => {
-    await Promise.all(normalizedItems.map((item) => writeAtomically(
+    // Settle every write before failing: a fail-fast rejection would release
+    // the lock — and let the caller start reconciling — while sibling writes
+    // are still landing, publishing items after the reconciliation looked.
+    const results = await Promise.allSettled(normalizedItems.map((item) => writeAtomically(
       join(pendingDir, filenameForItem(item)),
       JSON.stringify(item),
     )));
+    const failed = results.find((result) => result.status === "rejected");
+    if (failed) {
+      // Tell the caller which items actually landed: its reconciliation needs
+      // to distinguish a published-then-claimed delivery from one that was
+      // never written at all.
+      failed.reason.published = normalizedItems.filter((item, index) => results[index].status === "fulfilled").map((item) => item.id);
+      throw failed.reason;
+    }
     try {
       await writeMirrors(dir, pendingDir);
     } catch (error) {
@@ -293,7 +304,91 @@ export async function count() {
   return withLock(dir, async () => (await pendingFiles(pendingDir)).length);
 }
 
-export async function readAndClear({ remove = rm } = {}) {
+export async function removePending(itemIds) {
+  if (!Array.isArray(itemIds)) throw new TypeError("itemIds must be an array");
+
+  const { dir, pendingDir } = await ensureInbox();
+  return withLock(dir, async () => {
+    // Give an expired claim its recovery first, so cancellation reaches it —
+    // an unexpired claim legitimately belongs to the delivery that took it.
+    await recoverAbandonedClaims(pendingDir);
+    // Per-item best-effort throughout: reporting is the contract here — only
+    // a proven removal may appear in the result, and one failing entry must
+    // not discard the knowledge of what was already removed. Unproven items
+    // simply stay out of the result, so callers keep their records.
+    const requested = new Set(itemIds.filter(isUuid));
+    const removed = new Set();
+    // An id is reported only when every pending copy of it is proven gone.
+    // Failures are tracked per filename so that a copy whose deletion failed
+    // transiently, but which the duplicate scan then removes, clears its own
+    // failure instead of withholding the id forever. A filename whose payload
+    // is unknowable withholds every requested id.
+    const failed = new Map();
+    for (const itemId of requested) {
+      try {
+        await rm(join(pendingDir, itemId + ".json"));
+        removed.add(itemId);
+      } catch (error) {
+        // A claim rename makes the pending filename disappear. That is a normal
+        // lost cancellation race: delivery owns the item from that point on.
+        if (error?.code !== "ENOENT") { console.error(error); failed.set(itemId + ".json", itemId); }
+      }
+    }
+    // A recovered abandoned claim lives under a random filename — and can
+    // coexist with a canonical resend of the same annotation. Scan every
+    // remaining pending payload for the requested ids so no stale revision
+    // survives a cancellation; each id is reported once.
+    try {
+      for (const name of (await readdir(pendingDir)).filter((entry) => entry.endsWith(".json"))) {
+        let payload;
+        try {
+          payload = await readFile(join(pendingDir, name), "utf8");
+        } catch (error) {
+          // Gone or a directory: not a pending copy. Anything else is
+          // unreadable content that could duplicate any requested id.
+          if (error?.code === "ENOENT" || error?.code === "EISDIR") continue;
+          console.error(error);
+          failed.set(name, null);
+          continue;
+        }
+        let payloadId;
+        try {
+          // Unparseable files never reach the AI — readAndClear quarantines
+          // them as .corrupt — so they cannot hide a live duplicate.
+          payloadId = JSON.parse(payload)?.id;
+        } catch {
+          continue;
+        }
+        if (!requested.has(payloadId)) continue;
+        try {
+          await rm(join(pendingDir, name));
+          removed.add(payloadId);
+          failed.delete(name);
+        } catch (error) {
+          if (error?.code === "ENOENT") failed.delete(name);
+          else { console.error(error); failed.set(name, payloadId); }
+        }
+      }
+    } catch (error) {
+      console.error(error);
+      requested.forEach((id) => removed.delete(id));
+    }
+    failed.forEach((payloadId) => {
+      if (payloadId === null) requested.forEach((id) => removed.delete(id));
+      else removed.delete(payloadId);
+    });
+    try {
+      await writeMirrors(dir, pendingDir);
+    } catch (error) {
+      // Mirrors are derived and self-healing; a failed refresh must not turn an
+      // already completed cancellation into a reported failure.
+      console.error(error);
+    }
+    return [...removed];
+  });
+}
+
+export async function readAndClear({ remove = rm, onDelivered } = {}) {
   const { dir, pendingDir } = await ensureInbox();
   return withLock(dir, async () => {
     await recoverAbandonedClaims(pendingDir);
@@ -336,11 +431,23 @@ export async function readAndClear({ remove = rm } = {}) {
       }
     }));
     const deliveredEntries = removed.filter(Boolean);
+    const deliveredItems = deliveredEntries.map(({ item }) => item);
+    if (onDelivered) {
+      try {
+        // This runs before releasing the inbox lock so delivery and its progress
+        // transition have one ordering point. Hooks must not re-enter this lock.
+        await onDelivered(deliveredItems);
+      } catch (error) {
+        // Claim deletion is authoritative. Progress is observational metadata,
+        // so its failure cannot revoke or hide feedback already delivered.
+        console.error(error);
+      }
+    }
     try {
       await writeMirrors(dir, pendingDir);
     } catch (error) {
       console.error(error);
     }
-    return deliveredEntries.map(({ item }) => item);
+    return deliveredItems;
   });
 }

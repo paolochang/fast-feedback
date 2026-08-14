@@ -21,9 +21,9 @@ function request({ port, method = "POST", path = "/__ffb__/send", headers = {}, 
   });
 }
 
-async function startServer(id = "test-session") {
+async function startServer(id = "test-session", dependencies = {}) {
   const server = http.createServer((request, response) => {
-    if (!core.handleFfbRoute(request, response, { port: server.address().port, id })) {
+    if (!core.handleFfbRoute(request, response, { port: server.address().port, id, ...dependencies })) {
       response.writeHead(404);
       response.end();
     }
@@ -146,14 +146,308 @@ test("handleFfbRoute sends valid feedback to the inbox", async () => {
       body: JSON.stringify([{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", comment: "Stored by serve core" }]),
     });
     assert.equal(response.status, 200);
+    const result = JSON.parse(response.body);
+    assert.equal(result.progress, true);
+    assert.equal(result.items.length, 1);
+    assert.match(result.items[0].progress_id, /^[0-9a-f-]{36}$/i);
     const pending = await readFile(join(inboxDir, "pending", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.json"), "utf8");
     assert.match(pending, /Stored by serve core/);
+    assert.match(pending, new RegExp(result.items[0].progress_id));
   } finally {
     await new Promise((resolve) => server.close(resolve));
     if (previousInbox === undefined) delete process.env.FFB_INBOX;
     else process.env.FFB_INBOX = previousInbox;
     await rm(inboxDir, { recursive: true, force: true });
   }
+});
+
+test("handleFfbRoute creates queued progress before publishing pending items", async () => {
+  const calls = [];
+  let queuedEntries;
+  let appendedItems;
+  const server = await startServer("test-session", {
+    progressApi: { createQueued: async (entries) => { calls.push("queued"); queuedEntries = entries; } },
+    inboxApi: {
+      appendItems: async (items) => { calls.push("append"); appendedItems = items; },
+      count: async () => 1,
+    },
+  });
+  try {
+    const response = await request({ port: server.address().port, path: "/__ffb__/send?overlay=1", headers: authorizedHeaders(server.address().port), body: JSON.stringify([{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }]) });
+    assert.equal(response.status, 200);
+    assert.deepEqual(calls, ["queued", "append"]);
+    assert.equal(queuedEntries[0].progress_id, appendedItems[0].progress_id);
+    assert.equal(queuedEntries[0].item_id, appendedItems[0].id);
+    assert.ok(Date.parse(queuedEntries[0].sent_at));
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+});
+
+test("handleFfbRoute delivers feedback when queued progress cannot be written", async () => {
+  let appended = false;
+  const server = await startServer("test-session", {
+    progressApi: { createQueued: async () => { throw new Error("locked"); } },
+    inboxApi: { appendItems: async () => { appended = true; }, count: async () => 1 },
+  });
+  try {
+    const response = await request({ port: server.address().port, headers: authorizedHeaders(server.address().port), body: JSON.stringify([{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }]) });
+    assert.equal(response.status, 200);
+    assert.equal(appended, true);
+    assert.equal(JSON.parse(response.body).progress, false);
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+});
+
+test("handleFfbRoute reconciles publication failures but keeps records for claimed items", async () => {
+  const orphanItem = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const claimedItem = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  let queuedEntries;
+  let removedPending;
+  let withdrawnIds;
+  const server = await startServer("test-session", {
+    progressApi: {
+      createQueued: async (entries) => { queuedEntries = entries; },
+      withdraw: async (ids) => { withdrawnIds = ids; },
+    },
+    inboxApi: {
+      appendItems: async () => { throw new Error("disk full"); },
+      // The claimed item lost the removal race: a pull already delivered it.
+      removePending: async (ids) => { removedPending = ids; return ids.filter((id) => id !== claimedItem); },
+    },
+  });
+  try {
+    const response = await request({ port: server.address().port, headers: authorizedHeaders(server.address().port), body: JSON.stringify([{ id: orphanItem }, { id: claimedItem }]) });
+    assert.equal(response.status, 500);
+    assert.deepEqual(removedPending, [orphanItem, claimedItem]);
+    // Only the proven-orphaned record goes; the claimed item's record must
+    // survive for the agent's eventual ffb_complete.
+    assert.deepEqual(withdrawnIds, [queuedEntries.find((entry) => entry.item_id === orphanItem).progress_id]);
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+});
+
+test("handleFfbRoute returns partial tracking for deliveries that escape rollback", async () => {
+  const claimedItem = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const unwrittenItem = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  let queuedEntries;
+  let withdrawnIds;
+  const server = await startServer("test-session", {
+    progressApi: {
+      createQueued: async (entries) => { queuedEntries = entries; },
+      withdraw: async (ids) => { withdrawnIds = ids; },
+    },
+    inboxApi: {
+      // The claimed item's write landed before the failure; a pull then took
+      // it, so the reconciliation's removal finds nothing to pull back.
+      appendItems: async () => {
+        const failure = new Error("disk full");
+        failure.published = [claimedItem];
+        throw failure;
+      },
+      removePending: async () => [],
+      count: async () => 1,
+    },
+  });
+  try {
+    const response = await request({ port: server.address().port, headers: authorizedHeaders(server.address().port), body: JSON.stringify([{ id: claimedItem }, { id: unwrittenItem }]) });
+    assert.equal(response.status, 200);
+    const result = JSON.parse(response.body);
+    assert.equal(result.partial, true);
+    assert.deepEqual(result.items, [{ item_id: claimedItem, progress_id: queuedEntries.find((entry) => entry.item_id === claimedItem).progress_id }]);
+    // The never-written item's record is orphaned and withdrawn; the claimed
+    // delivery keeps its record for the agent's completion.
+    assert.deepEqual(withdrawnIds, [queuedEntries.find((entry) => entry.item_id === unwrittenItem).progress_id]);
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+});
+
+test("handleFfbRoute returns tracking for published items when removal cannot prove anything", async () => {
+  const publishedItem = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  let queuedEntries;
+  let withdrawCalled = false;
+  const server = await startServer("test-session", {
+    progressApi: {
+      createQueued: async (entries) => { queuedEntries = entries; },
+      withdraw: async () => { withdrawCalled = true; },
+    },
+    inboxApi: {
+      appendItems: async () => {
+        const failure = new Error("disk full");
+        failure.published = [publishedItem];
+        throw failure;
+      },
+      removePending: async () => { throw new Error("spool unreadable"); },
+      count: async () => 1,
+    },
+  });
+  try {
+    const response = await request({ port: server.address().port, headers: authorizedHeaders(server.address().port), body: JSON.stringify([{ id: publishedItem }]) });
+    // Nothing is proven withdrawn, so the published delivery must come back
+    // as partial tracking rather than a blind 500 that invites a duplicate.
+    assert.equal(response.status, 200);
+    const result = JSON.parse(response.body);
+    assert.equal(result.partial, true);
+    assert.deepEqual(result.items, [{ item_id: publishedItem, progress_id: queuedEntries[0].progress_id }]);
+    assert.equal(withdrawCalled, false);
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+});
+
+test("handleFfbRoute reports success with a null count when counting fails after publication", async () => {
+  const server = await startServer("test-session", {
+    progressApi: { createQueued: async () => {} },
+    inboxApi: { appendItems: async () => {}, count: async () => { throw new Error("count unavailable"); } },
+  });
+  try {
+    const response = await request({ port: server.address().port, headers: authorizedHeaders(server.address().port), body: JSON.stringify([{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }]) });
+    assert.equal(response.status, 200);
+    const result = JSON.parse(response.body);
+    assert.equal(result.ok, true);
+    assert.equal(result.count, null);
+    assert.equal(result.progress, true);
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+});
+
+test("handleFfbRoute refuses delivery when the progress rollback is dirty", async () => {
+  let appended = false;
+  const dirty = new Error("progress rollback incomplete");
+  dirty.code = "FFB_PROGRESS_DIRTY";
+  const server = await startServer("test-session", {
+    progressApi: { createQueued: async () => { throw dirty; } },
+    inboxApi: { appendItems: async () => { appended = true; }, count: async () => 1 },
+  });
+  try {
+    const response = await request({ port: server.address().port, headers: authorizedHeaders(server.address().port), body: JSON.stringify([{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }]) });
+    // Publishing against leftover records would let completions land on
+    // deliveries the overlay never polls; the send must fail outright.
+    assert.equal(response.status, 500);
+    assert.equal(appended, false);
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+});
+
+test("handleFfbRoute reads projected progress and validates bounded ids", async () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const server = await startServer("test-session", { progressApi: { readStatuses: async () => [{ progress_id: id, item_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", status: "processing", sent_at: "2026-01-01T00:00:00.000Z", claimed_at: "2026-01-01T00:01:00.000Z", settled_at: null }] } });
+  try {
+    const good = await request({ port: server.address().port, method: "GET", path: "/__ffb__/progress?ids=" + id, headers: { "x-ffb-token": core.FFB_SEND_TOKEN } });
+    assert.equal(good.status, 200);
+    assert.deepEqual(JSON.parse(good.body), { items: [{ progress_id: id, item_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", status: "processing", since: "2026-01-01T00:01:00.000Z" }] });
+    const bad = await request({ port: server.address().port, method: "GET", path: "/__ffb__/progress?ids=nope", headers: { "x-ffb-token": core.FFB_SEND_TOKEN } });
+    assert.equal(bad.status, 400);
+    const tooMany = Array.from({ length: 101 }, () => id).join(",");
+    const capped = await request({ port: server.address().port, method: "GET", path: "/__ffb__/progress?ids=" + tooMany, headers: { "x-ffb-token": core.FFB_SEND_TOKEN } });
+    assert.equal(capped.status, 400);
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+});
+
+test("handleFfbRoute withdraws queued spool items but keeps processing records", async () => {
+  const queued = "11111111-1111-4111-8111-111111111111";
+  const processing = "22222222-2222-4222-8222-222222222222";
+  const completed = "33333333-3333-4333-8333-333333333333";
+  const untrackedItem = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const claimedItem = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  let removedItemIds;
+  let deletedIds;
+  const server = await startServer("test-session", {
+    progressApi: {
+      readStatuses: async () => [
+        { progress_id: queued, item_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", status: "queued" },
+        { progress_id: processing, item_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", status: "processing" },
+        { progress_id: completed, item_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", status: "completed" },
+      ],
+      withdraw: async (ids) => { deletedIds = ids; },
+    },
+    inboxApi: { removePending: async (ids) => { removedItemIds = ids; return ids.filter((id) => id !== claimedItem); } },
+  });
+  try {
+    const response = await request({ port: server.address().port, path: "/__ffb__/withdraw?overlay=1", headers: authorizedHeaders(server.address().port), body: JSON.stringify({ ids: [queued, processing, completed], item_ids: [untrackedItem, claimedItem] }) });
+    assert.equal(response.status, 200);
+    assert.deepEqual(removedItemIds, ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", untrackedItem, claimedItem]);
+    // Only the confirmed-withdrawn record may be deleted: the completed one
+    // must survive so a Cancel that races a completion cannot orphan it.
+    assert.deepEqual(deletedIds, [queued]);
+    assert.deepEqual(JSON.parse(response.body), {
+      withdrawn: [queued],
+      already_delivered: [processing, completed],
+      withdrawn_items: [untrackedItem],
+    });
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+});
+
+test("handleFfbRoute reports confirmed withdrawals when record cleanup fails", async () => {
+  const queued = "11111111-1111-4111-8111-111111111111";
+  const server = await startServer("test-session", {
+    progressApi: {
+      readStatuses: async () => [{ progress_id: queued, item_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", status: "queued" }],
+      withdraw: async () => { throw new Error("record locked"); },
+    },
+    inboxApi: { removePending: async (ids) => ids },
+  });
+  const errors = [];
+  const originalError = console.error;
+  console.error = (error) => errors.push(error);
+  try {
+    const response = await request({ port: server.address().port, path: "/__ffb__/withdraw?overlay=1", headers: authorizedHeaders(server.address().port), body: JSON.stringify({ ids: [queued] }) });
+    // The spool withdrawal is irreversible; a record-cleanup hiccup must not
+    // hide it behind a 500, or the row stays locked with no work left.
+    assert.equal(response.status, 200);
+    assert.deepEqual(JSON.parse(response.body).withdrawn, [queued]);
+    assert.equal(errors.length, 1);
+  } finally {
+    console.error = originalError;
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("renderBoot injects authenticated progress and withdraw helpers", async () => {
+  const calls = [];
+  const helpers = bootHelpers(async (url, options = {}) => { calls.push({ url, options }); return { ok: true, json: async () => ({ items: [] }) }; });
+  await helpers.__FFB_PROGRESS(["id"]);
+  await helpers.__FFB_WITHDRAW(["id"]);
+  assert.equal(calls[0].url, "/__ffb__/progress?ids=id");
+  assert.equal(calls[0].options.headers["x-ffb-token"], core.FFB_SEND_TOKEN);
+  assert.equal(calls[1].url, "/__ffb__/withdraw");
+  assert.equal(calls[1].options.headers["x-ffb-token"], core.FFB_SEND_TOKEN);
+});
+
+test("renderBoot's progress helpers chunk oversized id batches and merge replies", async () => {
+  const ids = Array.from({ length: 250 }, (_, index) => "id-" + index);
+  const calls = [];
+  const helpers = bootHelpers(async (url, options = {}) => {
+    calls.push({ url, options });
+    return { ok: true, json: async () => ({ items: ["polled"], withdrawn: ["gone"], already_delivered: ["kept"], withdrawn_items: ["freed"] }) };
+  });
+  const progress = await helpers.__FFB_PROGRESS(ids);
+  assert.equal(calls.length, 3);
+  assert.ok(calls.every(({ url }) => url.split("%2C").length <= 100));
+  // JSON round-trips normalize objects built inside the boot script's vm context.
+  assert.deepEqual(JSON.parse(JSON.stringify(progress)), { items: ["polled", "polled", "polled"] });
+  calls.length = 0;
+  const withdrawal = await helpers.__FFB_WITHDRAW(ids, ids);
+  assert.equal(calls.length, 6);
+  assert.ok(calls.every(({ options }) => {
+    const body = JSON.parse(options.body);
+    return (body.ids || body.item_ids).length <= 100 && !(body.ids && body.item_ids);
+  }));
+  assert.deepEqual(JSON.parse(JSON.stringify(withdrawal)), {
+    withdrawn: Array(6).fill("gone"),
+    already_delivered: Array(6).fill("kept"),
+    withdrawn_items: Array(6).fill("freed"),
+  });
+});
+
+test("renderBoot injects the configured claim TTL for the overlay's retry pacing", { concurrency: false }, async () => {
+  const previous = process.env.FFB_CLAIM_TTL_MS;
+  try {
+    delete process.env.FFB_CLAIM_TTL_MS;
+    assert.equal(bootHelpers(async () => ({})).__FFB_CLAIM_TTL_MS, 60000);
+    process.env.FFB_CLAIM_TTL_MS = "120000";
+    assert.equal(bootHelpers(async () => ({})).__FFB_CLAIM_TTL_MS, 120000);
+  } finally {
+    if (previous === undefined) delete process.env.FFB_CLAIM_TTL_MS;
+    else process.env.FFB_CLAIM_TTL_MS = previous;
+  }
+});
+
+test("renderBoot's send helper resolves to the parsed send reply", async () => {
+  const reply = { ok: true, count: 1, progress: true, items: [{ item_id: "a", progress_id: "b" }] };
+  const helpers = bootHelpers(async () => ({ ok: true, json: async () => reply }));
+  assert.deepEqual(await helpers.__FFB_SEND([{ comment: "hi" }]), reply);
 });
 
 test("injectBoot inserts before the last closing body tag and appends without one", () => {

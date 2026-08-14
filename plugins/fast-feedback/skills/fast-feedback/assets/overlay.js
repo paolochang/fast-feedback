@@ -42,8 +42,8 @@
     // controls (the list icon and the box's corner button) must land on the same
     // deep red in a given theme. Collapsing them would either wash out delete or
     // make error text unreadable.
-    ':root{--__ffb_gold:#e8b23f;--__ffb_onaccent:#231a00;--__ffb_hlfill:rgba(232,178,63,.14);--__ffb_hlflash:rgba(232,178,63,.5);--__ffb_ink:#e8eaf0;--__ffb_mut:#8b93a6;--__ffb_surf:#12151c;--__ffb_head:#0f1218;--__ffb_line:#2b3140;--__ffb_field:#0e1116;--__ffb_card:#171b23;--__ffb_btn:#1b2029;--__ffb_btnh:#222834;--__ffb_warn:#e06b5a;--__ffb_danger:#c0392b;--__ffb_listen:#241a04;--__ffb_chip:#39445a;--__ffb_chipink:#e2e7f0;--__ffb_shadow:rgba(0,0,0,.5);--__ffb_shadowbar:rgba(0,0,0,.34)}',
-    ':root.__ffb_light{--__ffb_gold:#e5484d;--__ffb_onaccent:#ffffff;--__ffb_hlfill:rgba(229,72,77,.13);--__ffb_hlflash:rgba(229,72,77,.4);--__ffb_ink:#1c2126;--__ffb_mut:#6b7480;--__ffb_surf:#f5f6f8;--__ffb_head:#eceef2;--__ffb_line:#e2e5ea;--__ffb_field:#ffffff;--__ffb_card:#ffffff;--__ffb_btn:#ffffff;--__ffb_btnh:#f0f1f4;--__ffb_warn:#c0392b;--__ffb_danger:#c0392b;--__ffb_listen:#fdeaea;--__ffb_chip:#e0e4ec;--__ffb_chipink:#3d4655;--__ffb_shadow:rgba(17,24,39,.16);--__ffb_shadowbar:rgba(17,24,39,.07)}',
+    ':root{--__ffb_gold:#e8b23f;--__ffb_onaccent:#231a00;--__ffb_hlfill:rgba(232,178,63,.14);--__ffb_hlflash:rgba(232,178,63,.5);--__ffb_ink:#e8eaf0;--__ffb_mut:#8b93a6;--__ffb_surf:#12151c;--__ffb_head:#0f1218;--__ffb_line:#2b3140;--__ffb_field:#0e1116;--__ffb_card:#171b23;--__ffb_btn:#1b2029;--__ffb_btnh:#222834;--__ffb_warn:#e06b5a;--__ffb_danger:#c0392b;--__ffb_ok:#4a9d6a;--__ffb_listen:#241a04;--__ffb_chip:#39445a;--__ffb_chipink:#e2e7f0;--__ffb_shadow:rgba(0,0,0,.5);--__ffb_shadowbar:rgba(0,0,0,.34)}',
+    ':root.__ffb_light{--__ffb_gold:#e5484d;--__ffb_onaccent:#ffffff;--__ffb_hlfill:rgba(229,72,77,.13);--__ffb_hlflash:rgba(229,72,77,.4);--__ffb_ink:#1c2126;--__ffb_mut:#6b7480;--__ffb_surf:#f5f6f8;--__ffb_head:#eceef2;--__ffb_line:#e2e5ea;--__ffb_field:#ffffff;--__ffb_card:#ffffff;--__ffb_btn:#ffffff;--__ffb_btnh:#f0f1f4;--__ffb_warn:#c0392b;--__ffb_danger:#c0392b;--__ffb_ok:#1f7a4d;--__ffb_listen:#fdeaea;--__ffb_chip:#e0e4ec;--__ffb_chipink:#3d4655;--__ffb_shadow:rgba(17,24,39,.16);--__ffb_shadowbar:rgba(17,24,39,.07)}',
     '.__ffb_bar,.__ffb_form,.__ffb_panel,.__ffb_box,.__ffb_layer,.__ffb_confirm,.__ffb_modal{box-sizing:border-box;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}',
     // top strip
     '.__ffb_bar{position:fixed;z-index:2147483645;top:0;left:0;right:0;height:' + BAR_H + 'px;display:flex;gap:8px;align-items:center;padding:0 12px;background:var(--__ffb_surf);border-bottom:1px solid var(--__ffb_line);box-shadow:0 1px 0 var(--__ffb_line),0 2px 14px var(--__ffb_shadowbar);color:var(--__ffb_ink)}',
@@ -121,6 +121,15 @@
     '.__ffb_ic{width:22px;height:22px;border-radius:6px;border:1px solid var(--__ffb_line);background:var(--__ffb_surf);color:var(--__ffb_ink);font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}',
     '.__ffb_ic:hover{border-color:var(--__ffb_gold)}',
     '.__ffb_ic.__ffb_del:hover{color:var(--__ffb_danger);border-color:var(--__ffb_danger)}',
+    '.__ffb_ic:disabled{opacity:.32;cursor:not-allowed}.__ffb_ic:disabled:hover{border-color:var(--__ffb_line);color:var(--__ffb_ink)}',
+    '.__ffb_box.locked .__ffb_bdel{opacity:.32;cursor:not-allowed}.__ffb_box.locked .__ffb_bdel:hover{background:var(--__ffb_mut)}',
+    '.__ffb_chip{display:inline-flex;align-items:center;gap:5px;width:max-content;margin:0 0 5px;padding:2px 7px;border-radius:999px;background:var(--__ffb_chip);color:var(--__ffb_chipink);font-size:10.5px;font-weight:700}',
+    '.__ffb_chipdot{width:6px;height:6px;border-radius:50%;background:currentColor}.__ffb_chip.__ffb_completed{color:var(--__ffb_ok)}',
+    '.__ffb_chip.__ffb_failed{color:var(--__ffb_warn)}.__ffb_chip .__ffb_spin{width:8px;height:8px;border-width:1.5px}',
+    '.__ffb_progress{display:none;flex-direction:column;gap:5px;margin-bottom:8px;color:var(--__ffb_mut);font-size:11.5px;font-weight:600}.__ffb_progress.open{display:flex}',
+    '.__ffb_progressbar{height:3px;border-radius:3px;background:var(--__ffb_line);overflow:hidden}.__ffb_progressbar i{display:block;height:100%;background:var(--__ffb_gold)}',
+    '.__ffb_cancel{background:var(--__ffb_btn);color:var(--__ffb_ink)}.__ffb_cancel:hover{color:var(--__ffb_danger);border-color:var(--__ffb_danger);background:var(--__ffb_btn)}',
+    '.__ffb_progresswarn{padding:7px 9px;border:1px solid var(--__ffb_warn);border-radius:7px;color:var(--__ffb_warn);font-size:11.5px}',
     '.__ffb_item textarea{box-sizing:border-box;width:100%;background:var(--__ffb_field);color:var(--__ffb_ink);border:1px solid var(--__ffb_line);border-radius:6px;padding:6px 8px;font-size:13px;font-family:inherit;resize:vertical;min-height:52px}',
     '.__ffb_item .__ffb_iact{display:flex;gap:6px;justify-content:flex-end;margin-top:6px}',
     '.__ffb_hist{display:flex;gap:9px}',
@@ -242,7 +251,7 @@
   document.head.appendChild(style);
 
   var FILE = window.__FFB_FILE || document.title || (location.pathname + location.search) || "frontend";
-  var anns = [];            // committed: {id, n, sel, region, comment, sentToInbox, revision, archivedRevision, boxEl, anchor}
+  var anns = [];            // committed: includes state, progressId, and untracked
   var counter = 0;
   var active = false, drawing = false, startPage = null, tempEl = null;
   var draft = null;         // in-progress NEW annotation: {sel, region, boxEl, anchor}
@@ -297,21 +306,27 @@
     var sentToInbox = flush.sentToInbox;
     var archivedNew = flush.archivedNew;
     var count = flush.count;
+    var inFlight = flush.inFlight;
 
     if (count === 0) {
-      return { clear: false, toast: "Nothing new to send", isError: false };
+      return { clear: false, lock: false, toast: "Nothing new to send", isError: false };
     }
 
     if (sentToInbox === true) {
-      return { clear: true, toast: "Sent " + count + " items ✓", isError: false };
+      return { clear: false, lock: true, toast: "Sent " + count + " items · AI is working…", isError: false };
+    }
+
+    if (inFlight > 0) {
+      return { clear: false, lock: false, toast: "Already sent — the AI is working on these", isError: false };
     }
 
     if (archivedNew === 0) {
-      return { clear: false, toast: "Already archived — the AI did not receive this. Use Copy All.", isError: true };
+      return { clear: false, lock: false, toast: "Already archived — the AI did not receive this. Use Copy All.", isError: true };
     }
 
     return {
       clear: false,
+      lock: false,
       toast: "Archived " + count + " locally — the AI did not receive this. Use Copy All.",
       isError: true,
     };
@@ -326,6 +341,25 @@
       label: "Archive locally",
       title: "No server in this mode — archives to History. Use Copy All to reach the AI.",
     };
+  }
+
+  // Pure progress reducer. It returns a new status map and the settle decision;
+  // DOM and annotation mutation deliberately live with the caller.
+  function progressOutcome(current, updates) {
+    var next = {}, changed = false, locked = 0, completed = 0, terminal = 0;
+    Object.keys(current).forEach(function (id) { next[id] = current[id]; });
+    updates.forEach(function (item) {
+      var state = item.status === "unknown" ? null : item.status;
+      if (next[item.progress_id] !== state) changed = true;
+      next[item.progress_id] = state;
+    });
+    Object.keys(next).forEach(function (id) {
+      var state = next[id];
+      if (state === "queued" || state === "processing") locked++;
+      if (state === "completed") completed++;
+      if (state === "completed" || state === "failed" || state === "stalled" || state === null) terminal++;
+    });
+    return { states: next, changed: changed, locked: locked, completed: completed, settled: Object.keys(next).length > 0 && locked === 0 && terminal === Object.keys(next).length };
   }
 
   var layer = document.createElement("div");
@@ -357,12 +391,15 @@
     '<button class="__ffb_x" title="Close">✕</button></div>' +
     '<div class="__ffb_tabs"><div class="__ffb_tabgroup"><button class="__ffb_tab sel" data-tab="live">Live<span id="__ffb_livecnt"></span></button><button class="__ffb_tab" data-tab="history">History<span id="__ffb_histcnt"></span></button></div><div class="__ffb_tabact" id="__ffb_tabact"></div></div>' +
     '<div class="__ffb_list" id="__ffb_items"></div>' +
-    '<div id="__ffb_foot" style="padding:10px 12px;border-top:1px solid var(--__ffb_line);display:flex">' +
+    '<div id="__ffb_foot" style="padding:10px 12px;border-top:1px solid var(--__ffb_line);display:flex;flex-direction:column">' +
+    '<div class="__ffb_progress" id="__ffb_progress"><span id="__ffb_progresstext"></span><span class="__ffb_progressbar"><i id="__ffb_progressfill"></i></span></div>' +
     '<button class="__ffb_btn primary" id="__ffb_psend" title="' + sendButton.title + '" style="flex:1;padding:8px 12px">' + sendButton.label + '</button></div>';
   root.appendChild(panel);
   var itemsEl = panel.querySelector("#__ffb_items");
   var activeListTab = "live", historyRows = null, historyLoading = false, historyError = false, historyCount = null, historyCountLoading = false;
   var historyVisibleCount = 10, historyObjectUrls = [], historyObserver = null, historyDetailId = null, historyDetailData = null, historyLightbox = null;
+  var progressCapable = typeof window.__FFB_PROGRESS === "function";
+  var progressTimer = null, progressFailures = 0, progressReading = false;
 
   // ---- confirm dialog ---------------------------------------------------
   var confirmEl = document.createElement("div");
@@ -617,7 +654,7 @@
   function submitForm() {
     if (!draft) { form.classList.remove("open"); return; }
     var n = ++counter;
-    var ann = { id: crypto.randomUUID(), n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), sentToInbox: false, revision: 0, archivedRevision: -1, boxEl: draft.boxEl, anchor: draft.anchor };
+    var ann = { id: crypto.randomUUID(), n: n, sel: draft.sel, region: draft.region, comment: fTa.value.trim(), sentToInbox: false, revision: 0, archivedRevision: -1, state: null, progressId: null, progressRevision: null, untracked: false, lockedAt: null, withdrawing: false, untrackedRetryTimer: null, boxEl: draft.boxEl, anchor: draft.anchor };
     decorateBox(ann);
     anns.push(ann);
     draft = null;
@@ -632,15 +669,171 @@
     box.className = "__ffb_box";
     box.innerHTML = '<div class="__ffb_num">' + a.n + '</div><button class="__ffb_bdel" title="Delete this highlight"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button>';
     box.onclick = function () { openList(); flashBox(a.n); };
-    box.querySelector(".__ffb_bdel").onclick = function (e) { e.stopPropagation(); deleteAnn(a); };
+    box.querySelector(".__ffb_bdel").onclick = function (e) { e.stopPropagation(); if (!isLocked(a)) deleteAnn(a); };
+  }
+  function isLocked(a) { return a.state === "queued" || a.state === "processing"; }
+  function isHeld(a) { return isLocked(a) || a.state === "completed" || a.withdrawing === true; }
+  // Stalled items unlock but stay polled: their record survives server-side,
+  // so a late ffb_complete must still be able to land on the card.
+  // Withdrawing rows are excluded: polling one can observe "unknown" after
+  // the server deletes its record and strip the id the withdrawal reply is
+  // about to validate against.
+  function isTracked(a) { return !!a.progressId && !a.withdrawing && (isLocked(a) || a.state === "stalled"); }
+  // Untracked deliveries have no record to poll, but still need the watch
+  // loop: a local deadline stands in for the server's stall detection, giving
+  // a claimed-but-unreportable delivery an exit from its lock.
+  var UNTRACKED_STALL_MS = 30 * 60 * 1000;
+  function watchesProgress(a) { return isTracked(a) || (isLocked(a) && a.untracked); }
+  // A completion retires its row only when it matches the delivered revision,
+  // its archive actually exists, and no editor holds a draft on it.
+  function settleReady(a) { return a.state === "completed" && a.revision === a.progressRevision && a.archivedRevision === a.revision && editingN !== a.n; }
+  function retireCompleted(list) {
+    list.forEach(function (a) { releaseAnchor(a); if (a.boxEl) a.boxEl.remove(); });
+    anns = anns.filter(function (a) { return list.indexOf(a) === -1; });
+  }
+  // A stalled row unlocks for editing, but its server-side work (pending or
+  // claimed) is still live — destructive actions must withdraw it first.
+  function hasLiveDelivery(a) { return isHeld(a) || (a.state === "stalled" && (a.progressId || a.untracked || a.sentToInbox)); }
+  function removeAnn(a) {
+    releaseAnchor(a);
+    if (a.boxEl) a.boxEl.remove();
+    anns.splice(anns.indexOf(a), 1);
+    if (editingN === a.n) editingN = null;
+    renderList();
+  }
+  // An edited stalled row supersedes its outstanding delivery. Withdraw the
+  // old delivery so the new revision may send; if the AI already claimed it
+  // (unconfirmed), the row stays tracked and non-sendable until that work
+  // settles — settlement releases it for re-send.
+  function withdrawSuperseded(a) {
+    if (typeof window.__FFB_WITHDRAW !== "function") return;
+    // One withdrawal per row at a time: an overlapping request could outlive
+    // the first reply's flag reset and withdraw a later re-send.
+    if (a.withdrawing) return;
+    var progressId = a.progressId;
+    a.withdrawing = true;
+    patchProgressChips();
+    Promise.resolve(window.__FFB_WITHDRAW(progressId ? [progressId] : [], progressId ? [] : [a.id])).then(function (reply) {
+      a.withdrawing = false;
+      var confirmed = progressId
+        ? (reply && reply.withdrawn || []).indexOf(progressId) !== -1
+        : (reply && reply.withdrawn_items || []).indexOf(a.id) !== -1;
+      if (confirmed && a.progressId === progressId) { a.state = null; a.progressId = null; a.progressRevision = null; a.untracked = false; }
+      else if (!confirmed) {
+        // A tracked claimed delivery settles via its record; an untracked one
+        // never can, so it gets the bounded reconciliation instead.
+        if (progressId) showToast("The AI already took the previous version — the edit sends after it settles", false);
+        else scheduleUntrackedRelease(a);
+      }
+      renderList();
+      // The watch loop may have died while this row was excluded from it;
+      // restart it so an unconfirmed delivery's completion is still observed.
+      scheduleProgress();
+    }).catch(function () { a.withdrawing = false; renderList(); scheduleProgress(); if (!progressId) scheduleUntrackedRelease(a); });
+  }
+  // A claimed untracked delivery has no record that could ever settle, so a
+  // bounded reconciliation is its only terminal: retry the withdrawal once
+  // after the claim TTL — a died agent's claim will have been recovered to
+  // the spool by then and can confirm — and release the row either way.
+  // The retry must outlast the server's configured claim TTL (injected by the
+  // boot script), or it would run before an abandoned claim can be recovered
+  // and release the row while the stale claim later resurfaces beside a resend.
+  var UNTRACKED_WITHDRAW_RETRY_MS = (typeof window.__FFB_CLAIM_TTL_MS === "number" && isFinite(window.__FFB_CLAIM_TTL_MS) && window.__FFB_CLAIM_TTL_MS >= 0 ? window.__FFB_CLAIM_TTL_MS : 60 * 1000) + 30 * 1000;
+  // retire=false frees the row for re-send (a superseded edit); retire=true
+  // removes it (a deletion) — untracked claims have no record that could ever
+  // settle, so both intents share this bounded reconciliation.
+  function scheduleUntrackedRelease(a, retire) {
+    // One retry per row: a newer edit supersedes any pending one, so no stale
+    // request can outlive a release and withdraw the row's next delivery.
+    if (a.untrackedRetryTimer) clearTimeout(a.untrackedRetryTimer);
+    // Browser timers clamp past ~2^31-1 ms, which would fire an enormous
+    // configured TTL immediately; walk toward an absolute deadline in bounded
+    // chunks instead.
+    var deadline = Date.now() + UNTRACKED_WITHDRAW_RETRY_MS;
+    var arm = function () {
+      var remaining = deadline - Date.now();
+      if (remaining > 2147000000) { a.untrackedRetryTimer = setTimeout(arm, 2147000000); return; }
+      a.untrackedRetryTimer = setTimeout(fire, Math.max(0, remaining));
+    };
+    var fire = function () {
+      a.untrackedRetryTimer = null;
+      if (anns.indexOf(a) === -1 || !a.untracked || (!retire && a.sentToInbox)) return;
+      // An in-flight withdrawal owns the row; come back after it settles.
+      if (a.withdrawing) { scheduleUntrackedRelease(a, retire); return; }
+      var revision = a.revision;
+      // Hold the row through the request: Send stays blocked and no newer
+      // retry can start, so this request cannot race a re-send on the server
+      // and withdraw the row's next spool entry by its reused item id.
+      a.withdrawing = true;
+      patchProgressChips();
+      var release = function (confirmed) {
+        a.withdrawing = false;
+        // Re-validate at reply time: the row must still be the same untracked
+        // revision this retry was dispatched for.
+        if (anns.indexOf(a) === -1 || !a.untracked || a.revision !== revision || (!retire && a.sentToInbox)) { patchProgressChips(); return; }
+        if (retire) {
+          if (!confirmed) showToast("The AI already took this item — it may still be applied", false);
+          removeAnn(a);
+          return;
+        }
+        if (!confirmed) showToast("The previous version was already taken — re-sending may duplicate it", false);
+        a.untracked = false; a.state = null;
+        renderList();
+      };
+      if (typeof window.__FFB_WITHDRAW !== "function") { release(true); return; }
+      Promise.resolve(window.__FFB_WITHDRAW([], [a.id])).then(function (reply) {
+        release((reply && reply.withdrawn_items || []).indexOf(a.id) !== -1);
+      }).catch(function () { release(false); });
+    };
+    arm();
   }
   function deleteAnn(a) {
+    // Recheck the hold here, not only in the render: a send reply can lock
+    // this row while stale pre-lock controls — or an already-open confirm
+    // dialog — are still live.
+    if (isHeld(a)) return;
+    if (hasLiveDelivery(a)) {
+      if (typeof window.__FFB_WITHDRAW !== "function") { showToast("No server — can't withdraw this item", true); return; }
+      confirmDiscard("Delete annotation [" + a.n + "]? It is still pending for the AI and will be withdrawn. This can't be undone.", function () {
+        // The row may have been locked — or taken by another withdrawal (the
+        // untracked release retry) — while this dialog was open; starting a
+        // second withdrawal here would overlap it.
+        if (isHeld(a)) { showToast("The AI is working on this", false); renderList(); return; }
+        var progressId = a.progressId, revision = a.revision;
+        // Hold the row while the withdrawal is in flight: an edit + resend
+        // racing the reply would otherwise hand the new delivery a detached
+        // object whose completion nothing renders.
+        a.withdrawing = true;
+        patchProgressChips();
+        Promise.resolve(window.__FFB_WITHDRAW(progressId ? [progressId] : [], progressId ? [] : [a.id])).then(function (reply) {
+          a.withdrawing = false;
+          var confirmed = progressId
+            ? (reply && reply.withdrawn || []).indexOf(progressId) !== -1
+            : (reply && reply.withdrawn_items || []).indexOf(a.id) !== -1;
+          // Unconfirmed means the AI already took it. A tracked row keeps its
+          // record and settles visibly; an untracked one never can, so it
+          // gets the bounded reconciliation and is then retired. Restart the
+          // watch loop — it may have died while this row was excluded.
+          if (!confirmed) {
+            if (progressId) { showToast("The AI already took this item — it will settle when the AI finishes", false); }
+            else { showToast("The AI may already have this item — removing shortly", false); scheduleUntrackedRelease(a, true); }
+            patchProgressChips();
+            scheduleProgress();
+            return;
+          }
+          // Remove only the delivery we actually withdrew. A null progressId
+          // is fine — a poll that raced the withdrawal may have read "unknown"
+          // and released the handle; the revision pin still identifies the row.
+          if (anns.indexOf(a) === -1 || a.revision !== revision || (a.progressId !== null && a.progressId !== progressId)) { renderList(); scheduleProgress(); return; }
+          removeAnn(a);
+          scheduleProgress();
+        }).catch(function () { a.withdrawing = false; showToast("Couldn't withdraw — item kept", true); patchProgressChips(); scheduleProgress(); });
+      }, "Cancel", "Discard");
+      return;
+    }
     confirmDiscard("Delete annotation [" + a.n + "]? This can't be undone.", function () {
-      releaseAnchor(a);
-      if (a.boxEl) a.boxEl.remove();
-      anns.splice(anns.indexOf(a), 1);
-      if (editingN === a.n) editingN = null;
-      renderList();
+      if (isHeld(a)) { showToast("The AI is working on this", false); renderList(); return; }
+      removeAnn(a);
     }, "Cancel", "Discard");
   }
   form.querySelector("#__ffb_fsubmit").onclick = submitForm;
@@ -823,6 +1016,7 @@
     if (activeListTab === "history") renderHistory();
     else { clearHistoryThumbs(); renderLiveList(); }
     renderTabActions();
+    renderFooter();
   }
 
   function renderTabActions() {
@@ -839,7 +1033,8 @@
     };
     if (activeListTab === "live") {
       var liveCopy = add("Copy", function () { copyTextAndFlash(buildExport(), liveCopy); });
-      add("Clear", clearAll);
+      var clearButton = add("Clear", clearAll);
+      if (anns.some(hasLiveDelivery)) { clearButton.disabled = true; clearButton.title = "The AI is working on this"; }
       return;
     }
     if (historyDetailData && historyDetailData.id === historyDetailId) {
@@ -853,26 +1048,56 @@
   }
 
   function renderLiveList() {
+    // An open editor's unsaved text lives only in its textarea. A send reply,
+    // progress settle, or archive completion can re-render mid-edit; carry the
+    // draft across so the user can still save or explicitly discard it.
+    var draftTa = editingN !== null ? itemsEl.querySelector("textarea") : null;
+    var draft = draftTa ? draftTa.value : null;
     itemsEl.innerHTML = "";
     if (!anns.length) { itemsEl.innerHTML = '<div class="__ffb_empty">No feedback yet.<br>Arm Write and drag a box over the page.</div>'; return; }
+    if (progressFailures >= 20 && anns.some(isLocked)) itemsEl.innerHTML = '<div class="__ffb_progresswarn">Can\'t read progress</div>';
     anns.forEach(function (a) {
       var item = document.createElement("div");
       item.className = "__ffb_item"; item.setAttribute("data-n", a.n);
       if (editingN === a.n) {
         item.innerHTML =
           '<div><span class="__ffb_n">[' + a.n + ']</span><span class="__ffb_isel">' + esc(a.sel) + '</span></div>' +
-          '<textarea>' + esc(a.comment) + '</textarea>' +
+          '<textarea>' + esc(draft !== null ? draft : a.comment) + '</textarea>' +
           '<div class="__ffb_iact"><button class="__ffb_btn __ffb_ec">Close</button><button class="__ffb_btn primary __ffb_es">Save</button></div>';
         var ta = item.querySelector("textarea");
         setTimeout(function () { ta.focus(); }, 0);
+        var settleClosedEdit = function () {
+          // The AI finished this row while its editor was open — settlement
+          // kept it visible so the draft survived. Closing without saving a
+          // new revision means the applied annotation is done: remove it now.
+          if (a.state === "completed" && a.revision === a.progressRevision && a.archivedRevision === a.revision) {
+            retireCompleted([a]);
+            // If this was the last Live row, finish the batch the same way
+            // settleProgress would have: hand the user over to History.
+            if (!anns.length) { setListTab("history"); refreshHistoryCount(); showToast("All items applied ✓", false); }
+          }
+        };
         var save = function () {
           var comment = ta.value.trim();
-          if (comment !== a.comment) { a.comment = comment; a.sentToInbox = false; a.revision++; }
+          if (comment !== a.comment) {
+            // A send reply can lock this item — or a withdrawal can take it —
+            // while the form is still open; mutating it then would orphan the
+            // delivery's tracking or start an overlapping withdrawal. Keep
+            // the form (and the typed text) until the item settles.
+            if (isLocked(a) || a.withdrawing === true) { showToast("The AI is working on this — wait for it to settle", true); return; }
+            a.comment = comment; a.sentToInbox = false; a.revision++;
+            // Saved as a new revision: this row is fresh feedback now, not the
+            // applied delivery — drop the completion marker so it can re-send.
+            if (a.state === "completed") { a.state = null; a.progressRevision = null; }
+            // An edited stalled row still has its old delivery outstanding —
+            // tracked or untracked; withdraw it before the new revision may send.
+            if (a.state === "stalled" && (a.progressId || a.untracked)) withdrawSuperseded(a);
+          } else settleClosedEdit();
           editingN = null; renderList();
         };
         var closeEdit = function () {
-          if (ta.value.trim() !== a.comment) confirmDiscard("Discard your changes?", function () { editingN = null; renderList(); });
-          else { editingN = null; renderList(); }
+          if (ta.value.trim() !== a.comment) confirmDiscard("Discard your changes?", function () { settleClosedEdit(); editingN = null; renderList(); });
+          else { settleClosedEdit(); editingN = null; renderList(); }
         };
         editingClose = closeEdit;   // Esc is resolved by the capture listener, which needs this
         item.querySelector(".__ffb_es").onclick = save;
@@ -881,8 +1106,10 @@
           if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); }
         });
       } else {
+        var locked = isHeld(a);
         item.innerHTML =
-          '<div class="__ffb_tools"><button class="__ffb_ic __ffb_edit" title="Edit">✎</button><button class="__ffb_ic __ffb_del" title="Delete">🗑</button></div>' +
+          '<div class="__ffb_tools"><button class="__ffb_ic __ffb_edit" title="' + (locked ? "The AI is working on this" : "Edit") + '"' + (locked ? " disabled" : "") + '>✎</button><button class="__ffb_ic __ffb_del" title="' + (locked ? "The AI is working on this" : "Delete") + '"' + (locked ? " disabled" : "") + '>🗑</button></div>' +
+          statusChipHtml(a) +
           '<div class="__ffb_hdrow"><span class="__ffb_n">[' + a.n + ']</span><span class="__ffb_isel">' + esc(a.sel) + '</span></div>' +
           '<div class="__ffb_cmt">' + (a.comment ? esc(a.comment) : '<span style="color:var(--__ffb_mut)">(no comment)</span>') + '</div>';
         item.querySelector(".__ffb_edit").onclick = function () { editingN = a.n; renderList(); flashBox(a.n); };
@@ -890,7 +1117,33 @@
         item.addEventListener("mouseenter", function () { flashBox(a.n); });
       }
       itemsEl.appendChild(item);
+      if (a.boxEl) {
+        a.boxEl.classList.toggle("locked", isHeld(a));
+        var boxDelete = a.boxEl.querySelector(".__ffb_bdel");
+        if (boxDelete) { boxDelete.disabled = isHeld(a); boxDelete.title = isHeld(a) ? "The AI is working on this" : "Delete this highlight"; }
+      }
     });
+  }
+
+  function statusChipHtml(a) {
+    if (!progressCapable || !a.state) return "";
+    var labels = { queued: "Queued", processing: "Processing", completed: "Completed", failed: "Failed", stalled: "Stalled" };
+    var shape = a.state === "processing" ? '<span class="__ffb_spin"></span>' : '<span class="__ffb_chipdot"></span>';
+    return '<div class="__ffb_chip __ffb_' + a.state + '" data-progress-id="' + esc(a.progressId || "") + '" aria-live="polite">' + shape + labels[a.state] + (a.untracked ? " · untracked" : "") + '</div>';
+  }
+
+  function renderFooter() {
+    var locked = anns.filter(isLocked), tracked = anns.filter(function (a) { return !!a.progressId || a.untracked; });
+    var done = tracked.filter(function (a) { return a.state === "completed"; }).length;
+    var progress = panel.querySelector("#__ffb_progress"), button = panel.querySelector("#__ffb_psend");
+    if (progressCapable && locked.length) {
+      progress.classList.add("open");
+      panel.querySelector("#__ffb_progresstext").textContent = "AI working · " + done + "/" + tracked.length;
+      panel.querySelector("#__ffb_progressfill").style.width = (tracked.length ? Math.round(done / tracked.length * 100) : 0) + "%";
+      button.textContent = "Cancel"; button.title = "Cancel this batch"; button.className = "__ffb_btn __ffb_cancel";
+    } else {
+      progress.classList.remove("open"); button.textContent = sendButton.label; button.title = sendButton.title; button.className = "__ffb_btn primary";
+    }
   }
 
   function clearHistoryThumbs() {
@@ -1098,14 +1351,21 @@
   panel.querySelectorAll(".__ffb_tab").forEach(function (button) { button.onclick = function () { setListTab(button.getAttribute("data-tab")); }; });
   function closeList() { historyDetailId = null; clearHistoryThumbs(); panel.classList.remove("open"); }
   panel.querySelector(".__ffb_x").onclick = closeList;
-  panel.querySelector("#__ffb_psend").onclick = sendToAI;
+  panel.querySelector("#__ffb_psend").onclick = function () { if (progressCapable && anns.some(isLocked)) cancelBatch(); else sendToAI(); };
 
   // Clear wipes every committed annotation (and its box). Guarded by a confirm
   // since it's destructive and the boxes can't be recovered. Numbering restarts
   // at [1] afterwards so a fresh pass reads cleanly.
   function clearAll() {
-    if (!anns.length) return;
+    // hasLiveDelivery, not isLocked: a completed row parked for its failed
+    // archive is the only visible record of that feedback, and a stalled row
+    // still has live server-side work — Clear must erase neither. Delete
+    // handles stalled rows individually, with a confirmed withdrawal.
+    if (!anns.length || anns.some(hasLiveDelivery)) return;
     confirmDiscard("Clear all " + anns.length + " feedback item" + (anns.length > 1 ? "s" : "") + "? This can't be undone.", function () {
+      // A send reply can lock rows while this dialog was open; rows the AI
+      // now owns must survive the confirmation, like deleteAnn's recheck.
+      if (anns.some(hasLiveDelivery)) { showToast("The AI is working on this", false); renderList(); return; }
       anns.forEach(function (a) { releaseAnchor(a); if (a.boxEl) a.boxEl.remove(); });
       anns = [];
       counter = 0;
@@ -1281,6 +1541,137 @@
     t.select(); try { document.execCommand("copy"); } catch (e) {} t.remove();
   }
 
+  function scheduleProgress() {
+    clearTimeout(progressTimer); progressTimer = null;
+    if (!progressCapable || document.hidden || !anns.some(watchesProgress)) return;
+    progressTimer = setTimeout(readProgress, progressFailures >= 3 ? 5000 : 1500);
+  }
+
+  function patchProgressChips() {
+    anns.forEach(function (a) {
+      var item = itemsEl.querySelector('[data-n="' + a.n + '"]');
+      if (!item) return;
+      var old = item.querySelector(".__ffb_chip"), holder = document.createElement("div");
+      holder.innerHTML = statusChipHtml(a);
+      if (old && holder.firstChild) old.replaceWith(holder.firstChild);
+      else if (old) old.remove();
+      else if (holder.firstChild) item.insertBefore(holder.firstChild, item.querySelector(".__ffb_hdrow"));
+      var held = isHeld(a);
+      item.querySelectorAll(".__ffb_ic").forEach(function (button) { button.disabled = held; button.title = held ? "The AI is working on this" : (button.classList.contains("__ffb_edit") ? "Edit" : "Delete"); });
+      if (a.boxEl) {
+        a.boxEl.classList.toggle("locked", held);
+        var boxDelete = a.boxEl.querySelector(".__ffb_bdel");
+        if (boxDelete) { boxDelete.disabled = held; boxDelete.title = held ? "The AI is working on this" : "Delete this highlight"; }
+      }
+    });
+    renderFooter(); renderTabActions();
+  }
+
+  function settleProgress(total) {
+    var completed = anns.filter(function (a) { return a.progressId && settleReady(a); });
+    retireCompleted(completed);
+    anns.forEach(function (a) { if (!isLocked(a) && a.state !== "stalled" && a.state !== "completed") { a.progressId = null; a.progressRevision = null; a.untracked = false; a.sentToInbox = false; } });
+    // A completion that survived removal either settled a superseded revision
+    // (the item stalled and was edited — release everything, the new text
+    // re-sends on the next flush) or was held back by settleReady: an open
+    // editor (settleClosedEdit finishes it) or a missing archive (the next
+    // flush retries the archive and finishes it). The completed marker must
+    // survive for those; only the polling handle is dropped.
+    anns.forEach(function (a) {
+      if (a.state !== "completed") return;
+      if (a.revision !== a.progressRevision) { a.state = null; a.progressRevision = null; }
+      a.progressId = null; a.untracked = false;
+    });
+    if (completed.length === total) {
+      refreshHistoryCount(); showToast("All " + total + " items applied ✓", false);
+      // Hand off to History only when Live is actually empty — a draft the
+      // user added while the batch was processing must stay on screen.
+      if (!anns.length) setListTab("history"); else renderList();
+    }
+    else renderList();
+  }
+
+  function readProgress() {
+    // Untracked deliveries stall on a local clock — there is no record whose
+    // deadlines the server could project for them.
+    var stalledNow = false;
+    anns.forEach(function (a) { if (isLocked(a) && a.untracked && a.lockedAt && Date.now() - a.lockedAt > UNTRACKED_STALL_MS) { a.state = "stalled"; stalledNow = true; } });
+    if (stalledNow) {
+      patchProgressChips();
+      // The stall may have been the last blocker holding settlement back —
+      // and polling can end right here (stalled untracked rows are not
+      // watched), so already-terminal rows must settle now or never.
+      if (!anns.some(isLocked) && anns.some(function (a) { return a.state === "completed"; })) {
+        settleProgress(anns.filter(function (a) { return !!a.progressId || a.untracked; }).length);
+      }
+    }
+    var tracked = anns.filter(isTracked);
+    if (!tracked.length || progressReading || document.hidden) { scheduleProgress(); return; }
+    progressReading = true;
+    var current = {}, total = anns.filter(function (a) { return !!a.progressId || a.untracked; }).length;
+    tracked.forEach(function (a) { current[a.progressId] = a.state; });
+    Promise.resolve(window.__FFB_PROGRESS(tracked.map(function (a) { return a.progressId; }))).then(function (reply) {
+      var result = progressOutcome(current, reply && reply.items || []);
+      progressFailures = 0;
+      anns.forEach(function (a) { if (a.progressId && Object.prototype.hasOwnProperty.call(result.states, a.progressId)) a.state = result.states[a.progressId]; });
+      // The changed gate keeps a batch that is already all-stalled (still
+      // polled, still terminal) from re-settling and re-rendering every tick.
+      if (result.changed && result.settled && !anns.some(function (a) { return isLocked(a) && a.untracked; })) settleProgress(total);
+      else if (result.changed) patchProgressChips();
+    }).catch(function () {
+      progressFailures++;
+      if (progressFailures === 20) renderList();
+    }).then(function () { progressReading = false; scheduleProgress(); });
+  }
+
+  var cancelInFlight = false;
+  function cancelBatch() {
+    // One cancellation at a time: a second overlapping request could confirm
+    // after the first unlocked and re-sent a row, withdrawing the new spool
+    // entry by its reused item id.
+    if (cancelInFlight) { showToast("Cancelling…", false); return; }
+    // And never while a send is in flight (the optimistic dispatch hold shows
+    // Cancel early): withdrawing mid-send lets the reply re-track a row whose
+    // spool entry is already gone, locking it until the stall deadline.
+    if (sendInFlight) { showToast("Sending — try again in a moment", false); return; }
+    var batch = anns.filter(function (a) { return isLocked(a); });
+    var ids = batch.filter(function (a) { return a.progressId; }).map(function (a) { return a.progressId; });
+    var itemIds = batch.filter(function (a) { return !a.progressId; }).map(function (a) { return a.id; });
+    if (typeof window.__FFB_WITHDRAW !== "function") return;
+    cancelInFlight = true;
+    Promise.resolve(window.__FFB_WITHDRAW(ids, itemIds)).then(function (reply) {
+      cancelInFlight = false;
+      // Unlock only what the server confirmed it pulled back — by progress ID
+      // for tracked items, by item ID for untracked ones. Anything already
+      // claimed stays locked (and, when tracked, polled) so its eventual
+      // completion still lands on the card instead of enabling a duplicate send.
+      var withdrawnIds = reply && reply.withdrawn ? reply.withdrawn : [];
+      var withdrawnItems = reply && reply.withdrawn_items ? reply.withdrawn_items : [];
+      var cancelled = 0;
+      batch.forEach(function (a) {
+        if (a.progressId ? withdrawnIds.indexOf(a.progressId) === -1 : withdrawnItems.indexOf(a.id) === -1) return;
+        cancelled++;
+        a.state = null; a.progressId = null; a.progressRevision = null; a.untracked = false; a.sentToInbox = false;
+      });
+      progressFailures = 0;
+      // Cancelling the last active item must not strand completed siblings:
+      // with nothing left to poll, settlement would otherwise never run and a
+      // completed annotation would stay held in Live indefinitely.
+      var remaining = anns.filter(function (a) { return !!a.progressId || a.untracked; }).length;
+      if (remaining && !anns.some(isLocked) && anns.some(function (a) { return a.state === "completed"; })) settleProgress(remaining);
+      else renderList();
+      var missed = batch.length - cancelled;
+      showToast(cancelled + " withdrawn" + (missed ? " · " + missed + " couldn't be cancelled" : ""), false);
+      scheduleProgress();
+    }).catch(function () { cancelInFlight = false; showToast("Cancel failed · items kept", true); });
+  }
+
+  document.addEventListener("visibilitychange", function () {
+    if (!progressCapable) return;
+    if (document.hidden) { clearTimeout(progressTimer); progressTimer = null; }
+    else if (anns.some(watchesProgress)) readProgress();
+  });
+
   // ---- send to AI --------------------------------------------------------
   // Served file and live/proxy modes inject __FFB_SEND. Console/bookmarklet mode
   // archives locally through historyStore, keeping Copy All as the universal fallback.
@@ -1290,6 +1681,9 @@
     var canArchive = typeof window.__FFB_ARCHIVE === "function" || hasIndexedDb();
     if (!canSend && !canArchive) { showToast("No server — use Copy All", false); return; }
     if (sendInFlight) { showToast("Sending…", false); return; }
+    // A pending withdrawal must settle first: dispatching now could let its
+    // late confirmation remove a row the new send is about to lock.
+    if (anns.some(function (a) { return a.withdrawing === true; })) { showToast("Withdrawing an item — try again in a moment", false); return; }
     // Don't start a flush while a manual Screenshot capture is running: captures
     // serialize (they need contradictory box visibility), so the archive capture
     // would queue AFTER we froze the rects/URL and dispatched the send — a page
@@ -1315,11 +1709,16 @@
       var a = entry.ann;
       return { id: entry.id, n: a.n, sel: a.sel, region: a.region, comment: a.comment, url: location.href, ts: new Date().toISOString() };
     });
-    var toSend = snapshot.filter(function (entry) { return !entry.ann.sentToInbox; });
+    // A row still carrying a progressId (or the untracked flag) has an
+    // outstanding delivery — an edited stalled item whose withdrawal is
+    // unconfirmed. Sending it now would duplicate live work; it re-sends
+    // once that delivery settles or its withdrawal is confirmed.
+    var toSend = snapshot.filter(function (entry) { return !entry.ann.sentToInbox && !entry.ann.progressId && !entry.ann.untracked; });
     var toArchive = snapshot.filter(function (entry) { return entry.ann.archivedRevision !== entry.revision; });
     var basis = canSend && toSend.length ? currentRegionBasis() : null;
     var request;
     var sentToInbox = false;
+    var partialSend = false;
     var archiveStarted = false;
     var flushUrl = location.href;   // freeze the URL at flush start (see capturePromise)
     sendInFlight = true;
@@ -1333,6 +1732,15 @@
       showToast("Send failed — items kept", true);
       return;
     }
+    // Hold the outgoing rows from the moment of dispatch: an edit saved while
+    // /send was in flight would otherwise leave the delivered old revision
+    // unreconciled and the edit immediately resendable as a duplicate. The
+    // reply upgrades this optimistic hold to real tracking (or lifts it for
+    // rows a partial response reports undelivered); a failed send lifts it.
+    if (request && progressCapable) {
+      toSend.forEach(function (entry) { entry.ann.state = "queued"; entry.ann.untracked = true; entry.ann.lockedAt = Date.now(); });
+      patchProgressChips();
+    }
     // Capture the page at flush start, in parallel with the already-dispatched
     // send, so the screenshot, frozen box geometry, and URL are one coherent
     // snapshot: an SPA nav/resize/reflow during the in-flight send can't smear a
@@ -1340,14 +1748,48 @@
     // stays independent of capture — inbox delivery must not hinge on html2canvas.
     var capturePromise = toArchive.length ? capturePng(true) : null;
     if (capturePromise) capturePromise.catch(function () {});   // send-fail paths discard it; avoid an unhandled rejection
-    Promise.resolve(request).then(function () {
-      if (canSend) {
+    Promise.resolve(request).then(function (reply) {
+      if (canSend && toSend.length) {
         sentToInbox = true;
+        // A partial reply means the server's rollback pulled some items back:
+        // only the deliveries it reports may lock — the rest stayed local and
+        // must remain retryable.
+        var deliveredIds = null;
+        if (reply && reply.partial === true) {
+          partialSend = true;
+          deliveredIds = {};
+          (reply.items || []).forEach(function (item) { deliveredIds[item.item_id] = true; });
+        }
         // Only mark the revision we actually sent as delivered. If the user edited
         // this annotation while the send was in flight (edit resets sentToInbox to
         // false and bumps revision), leave it unsent so the edited comment is
         // re-delivered to the inbox on the next flush.
-        toSend.forEach(function (entry) { if (entry.ann.revision === entry.revision) entry.ann.sentToInbox = true; });
+        toSend.forEach(function (entry) { if (entry.ann.revision === entry.revision && (!deliveredIds || deliveredIds[entry.id])) entry.ann.sentToInbox = true; });
+        // Lock right here, before the archive below gets a chance to reject:
+        // the items are already queued for the AI either way. A progress:false
+        // reply carries IDs that have no records — storing one would let the
+        // first poll read "unknown" and unlock delivered work, so those items
+        // stay locked as untracked instead.
+        if (progressCapable) {
+          toSend.forEach(function (entry) {
+            // An edit that landed while the send was in flight bumped the
+            // revision: the old delivery's progress must not claim (and later
+            // settle away) the edited annotation. Leave it unlocked for re-send.
+            if (entry.ann.revision !== entry.revision) return;
+            // A partial reply reports this row undelivered: lift the
+            // optimistic dispatch hold so it stays local and retryable.
+            if (deliveredIds && !deliveredIds[entry.id]) { entry.ann.state = null; entry.ann.untracked = false; entry.ann.lockedAt = null; return; }
+            var matches = reply && reply.progress !== false && reply.items ? reply.items.filter(function (item) { return item.item_id === entry.id; }) : [];
+            entry.ann.state = "queued";
+            entry.ann.progressId = matches.length ? matches[0].progress_id : null;
+            entry.ann.progressRevision = entry.revision;
+            entry.ann.untracked = !entry.ann.progressId;
+            entry.ann.lockedAt = Date.now();
+          });
+          // The stale pre-lock controls stay clickable until the next full
+          // render (after the archive settles); patch them right away.
+          patchProgressChips();
+        }
       }
       if (!toArchive.length) return null;
       archiveStarted = true;
@@ -1360,8 +1802,8 @@
           // pixel width. Their ratio is the device-pixels-per-CSS-pixel factor,
           // which the History composite needs to size its chrome (composeHistoryShot).
           capture: { w: capture.w, h: capture.h, docW: capture.docW },
-          items: snapshot.map(function (entry, index) {
-            var item = items[index];
+          items: toArchive.map(function (entry) {
+            var item = items[snapshot.indexOf(entry)];
             return {
               id: entry.id,
               n: item.n,
@@ -1376,12 +1818,20 @@
         });
       });
     }).then(function () {
-      var outcome = flushOutcome({ sentToInbox: sentToInbox, archivedNew: toArchive.length, count: items.length });
+      var outcome = flushOutcome({ sentToInbox: sentToInbox, archivedNew: toArchive.length, count: items.length, inFlight: items.length - toSend.length });
       if (outcome.clear) {
         var flushed = snapshot.filter(function (entry) { return entry.ann.revision === entry.revision && anns.indexOf(entry.ann) !== -1; });
         flushed.forEach(function (entry) { releaseAnchor(entry.ann); if (entry.ann.boxEl) entry.ann.boxEl.remove(); });
         anns = anns.filter(function (a) { return !flushed.some(function (entry) { return entry.ann === a; }); });
       }
+      // A completion observed while its archive was missing (a failed capture)
+      // parked the row as a held ✓; the archive above just landed, so finish
+      // those settlements now — including the all-completed handoff when this
+      // recovery empties Live, exactly as settleProgress would have done.
+      var settledNow = anns.filter(settleReady);
+      if (settledNow.length) retireCompleted(settledNow);
+      var handedOff = settledNow.length && !anns.length;
+      if (handedOff) setListTab("history");
       historyRows = null;
       historyError = false;
       historyVisibleCount = 10;
@@ -1389,9 +1839,24 @@
       updateHistoryCount();
       refreshHistoryCount();
       renderList();
-      showToast(outcome.toast, outcome.isError);
+      var toastText = outcome.toast, toastError = outcome.isError;
+      if (handedOff) { toastText = "All items applied ✓"; toastError = false; }
+      else if (partialSend) { toastText = "Some items didn't send — press Send to retry"; toastError = true; }
+      showToast(toastText, toastError);
+      scheduleProgress();
     }).catch(function () {
       showToast(archiveStarted ? "Archive failed — items kept" : "Send failed — items kept", true);
+      // The send itself failed: lift the optimistic dispatch hold so the
+      // undelivered rows are editable and retryable again.
+      if (!sentToInbox && progressCapable) {
+        toSend.forEach(function (entry) {
+          if (entry.ann.revision === entry.revision && entry.ann.state === "queued" && !entry.ann.progressId) { entry.ann.state = null; entry.ann.untracked = false; entry.ann.lockedAt = null; }
+        });
+        renderList();
+      }
+      // The archive rejected after delivery: the lock above already landed, so
+      // surface it and start polling rather than leaving delivered items editable.
+      if (sentToInbox) { renderList(); scheduleProgress(); }
     }).then(function () {
       sendInFlight = false;
     });
@@ -2076,7 +2541,13 @@
         if (action === "write") setActive(!active);
         else if (action === "list") toggleList();
         else if (action === "copy") copyAll();
-        else if (action === "send") sendToAI();
+        else if (action === "send") {
+          // One batch at a time: the blind hotkey must not start a second
+          // concurrent batch while one is locked — and unlike the labelled
+          // footer button, it must not cancel work by surprise either.
+          if (progressCapable && anns.some(isLocked)) showToast("The AI is working — use Cancel in the panel", false);
+          else sendToAI();
+        }
         else if (action === "screenshot") takeScreenshot();
         else if (action === "settings") openSettings();
         return;

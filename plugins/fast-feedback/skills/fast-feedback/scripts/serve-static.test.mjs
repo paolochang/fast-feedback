@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const scriptPath = fileURLToPath(new URL("./serve-static.mjs", import.meta.url));
+const pluginVersion = JSON.parse(await readFile(new URL("../../../.claude-plugin/plugin.json", import.meta.url), "utf8")).version;
 
 function request({ port, method = "GET", path = "/", headers = {}, body }) {
   return new Promise((resolve, reject) => {
@@ -124,7 +125,7 @@ test("writes a static session marker after binding the server port", async () =>
       assert.deepEqual({ ...marker, id: undefined, started_at: undefined, uptime_ms: undefined }, {
         id: undefined,
         mode: "static",
-        version: "0.3.0",
+        version: pluginVersion,
         url: "http://127.0.0.1:" + server.port,
         started_at: undefined,
         uptime_ms: undefined,
