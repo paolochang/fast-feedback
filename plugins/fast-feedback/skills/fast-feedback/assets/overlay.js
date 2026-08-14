@@ -707,6 +707,9 @@
   // settles — settlement releases it for re-send.
   function withdrawSuperseded(a) {
     if (typeof window.__FFB_WITHDRAW !== "function") return;
+    // One withdrawal per row at a time: an overlapping request could outlive
+    // the first reply's flag reset and withdraw a later re-send.
+    if (a.withdrawing) return;
     var progressId = a.progressId;
     a.withdrawing = true;
     patchProgressChips();
@@ -1045,10 +1048,11 @@
         var save = function () {
           var comment = ta.value.trim();
           if (comment !== a.comment) {
-            // A send reply can lock this item while the form is still open;
-            // mutating it then would orphan the delivery's tracking. Keep the
-            // form (and the typed text) until the item settles.
-            if (isLocked(a)) { showToast("The AI is working on this — wait for it to settle", true); return; }
+            // A send reply can lock this item — or a withdrawal can take it —
+            // while the form is still open; mutating it then would orphan the
+            // delivery's tracking or start an overlapping withdrawal. Keep
+            // the form (and the typed text) until the item settles.
+            if (isLocked(a) || a.withdrawing === true) { showToast("The AI is working on this — wait for it to settle", true); return; }
             a.comment = comment; a.sentToInbox = false; a.revision++;
             // Saved as a new revision: this row is fresh feedback now, not the
             // applied delivery — drop the completion marker so it can re-send.

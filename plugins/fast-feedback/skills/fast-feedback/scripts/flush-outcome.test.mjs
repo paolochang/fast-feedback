@@ -126,7 +126,7 @@ test("send lock and edit save respect in-flight revisions", () => {
   // The lock loop must skip entries edited while the send was in flight, and
   // the edit form must refuse to mutate an annotation the lock already claimed.
   assert.match(overlay, /if \(entry\.ann\.revision !== entry\.revision\) return;/);
-  assert.match(overlay, /if \(isLocked\(a\)\) \{ showToast\("The AI is working on this — wait for it to settle", true\); return; \}/);
+  assert.match(overlay, /if \(isLocked\(a\) \|\| a\.withdrawing === true\) \{ showToast\("The AI is working on this — wait for it to settle", true\); return; \}/);
   // Settlement removes a row only for the delivered revision with an existing
   // archive, never from under an open editor; closing that editor (or the
   // flush that retries the archive) finishes the settlement.
