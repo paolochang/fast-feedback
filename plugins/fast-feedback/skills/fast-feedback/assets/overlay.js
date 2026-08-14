@@ -746,7 +746,16 @@
     // One retry per row: a newer edit supersedes any pending one, so no stale
     // request can outlive a release and withdraw the row's next delivery.
     if (a.untrackedRetryTimer) clearTimeout(a.untrackedRetryTimer);
-    a.untrackedRetryTimer = setTimeout(function () {
+    // Browser timers clamp past ~2^31-1 ms, which would fire an enormous
+    // configured TTL immediately; walk toward an absolute deadline in bounded
+    // chunks instead.
+    var deadline = Date.now() + UNTRACKED_WITHDRAW_RETRY_MS;
+    var arm = function () {
+      var remaining = deadline - Date.now();
+      if (remaining > 2147000000) { a.untrackedRetryTimer = setTimeout(arm, 2147000000); return; }
+      a.untrackedRetryTimer = setTimeout(fire, Math.max(0, remaining));
+    };
+    var fire = function () {
       a.untrackedRetryTimer = null;
       if (anns.indexOf(a) === -1 || !a.untracked || (!retire && a.sentToInbox)) return;
       // An in-flight withdrawal owns the row; come back after it settles.
@@ -775,7 +784,8 @@
       Promise.resolve(window.__FFB_WITHDRAW([], [a.id])).then(function (reply) {
         release((reply && reply.withdrawn_items || []).indexOf(a.id) !== -1);
       }).catch(function () { release(false); });
-    }, UNTRACKED_WITHDRAW_RETRY_MS);
+    };
+    arm();
   }
   function deleteAnn(a) {
     // Recheck the hold here, not only in the render: a send reply can lock
