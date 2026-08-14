@@ -318,6 +318,11 @@ export async function removePending(itemIds) {
     // simply stay out of the result, so callers keep their records.
     const requested = new Set(itemIds.filter(isUuid));
     const removed = new Set();
+    // An id is reported only when every pending copy of it is proven gone: a
+    // failed deletion or an unreadable entry marks it (or, when the entry's
+    // payload is unknowable, every requested id) unproven, and unproven ids
+    // drop out of the result so callers keep their records and rows.
+    const unproven = new Set();
     for (const itemId of requested) {
       try {
         await rm(join(pendingDir, itemId + ".json"));
@@ -325,7 +330,7 @@ export async function removePending(itemIds) {
       } catch (error) {
         // A claim rename makes the pending filename disappear. That is a normal
         // lost cancellation race: delivery owns the item from that point on.
-        if (error?.code !== "ENOENT") console.error(error);
+        if (error?.code !== "ENOENT") { console.error(error); unproven.add(itemId); }
       }
     }
     // A recovered abandoned claim lives under a random filename — and can
@@ -334,9 +339,22 @@ export async function removePending(itemIds) {
     // survives a cancellation; each id is reported once.
     try {
       for (const name of (await readdir(pendingDir)).filter((entry) => entry.endsWith(".json"))) {
+        let payload;
+        try {
+          payload = await readFile(join(pendingDir, name), "utf8");
+        } catch (error) {
+          // Gone or a directory: not a pending copy. Anything else is
+          // unreadable content that could duplicate any requested id.
+          if (error?.code === "ENOENT" || error?.code === "EISDIR") continue;
+          console.error(error);
+          requested.forEach((id) => unproven.add(id));
+          continue;
+        }
         let payloadId;
         try {
-          payloadId = JSON.parse(await readFile(join(pendingDir, name), "utf8"))?.id;
+          // Unparseable files never reach the AI — readAndClear quarantines
+          // them as .corrupt — so they cannot hide a live duplicate.
+          payloadId = JSON.parse(payload)?.id;
         } catch {
           continue;
         }
@@ -345,12 +363,14 @@ export async function removePending(itemIds) {
           await rm(join(pendingDir, name));
           removed.add(payloadId);
         } catch (error) {
-          if (error?.code !== "ENOENT") console.error(error);
+          if (error?.code !== "ENOENT") { console.error(error); unproven.add(payloadId); }
         }
       }
     } catch (error) {
       console.error(error);
+      requested.forEach((id) => unproven.add(id));
     }
+    unproven.forEach((id) => removed.delete(id));
     try {
       await writeMirrors(dir, pendingDir);
     } catch (error) {

@@ -287,6 +287,27 @@ test("removePending reports proven removals even when another entry cannot be re
   });
 });
 
+test("removePending withholds an id while one of its copies cannot be removed", async () => {
+  await withInbox(async (dir) => {
+    const itemId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const errors = [];
+    const originalError = console.error;
+    console.error = (error) => errors.push(error);
+    try {
+      await appendItems([{ id: itemId, comment: "duplicate" }]);
+      // Move the payload to a recovered-style random name, then squat the
+      // canonical path with a directory so its rm fails: one copy of the id
+      // is removable, the other is not — the id must not be reported.
+      await rename(join(dir, "pending", itemId + ".json"), join(dir, "pending", "cccccccc-cccc-4ccc-8ccc-cccccccccccc.json"));
+      await mkdir(join(dir, "pending", itemId + ".json"));
+      assert.deepEqual(await removePending([itemId]), []);
+      assert.ok(errors.length >= 1);
+    } finally {
+      console.error = originalError;
+    }
+  });
+});
+
 test("removePending clears recovered duplicates alongside a canonical resend", async () => {
   await withInbox(async (dir) => {
     const itemId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
